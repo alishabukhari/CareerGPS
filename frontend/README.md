@@ -1,36 +1,135 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CareerGPS 🚀  
+AI-Powered Career Path & Skill Mapping Platform
 
-## Getting Started
+CareerGPS is an AI-driven platform designed to help students and early-career professionals understand **where they stand**, **what skills they are missing**, and **how to progress toward a desired career path**.
 
-First, run the development server:
+This project focuses on backend engineering, authentication, database design, and scalable system architecture.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+---
+
+## 🎯 Problem Statement
+
+Students often struggle to answer:
+- What roles fit my current skills?
+- What should I learn next?
+- How far am I from a specific career path?
+
+CareerGPS addresses this by:
+- Collecting user skills and interests
+- Mapping them against role requirements
+- Providing structured, actionable guidance
+
+---
+
+## 🛠️ Tech Stack
+
+**Backend**
+- Python
+- FastAPI
+- Supabase (PostgreSQL, Authentication, RLS)
+
+**Frontend**
+- Next.js
+- React
+- TypeScript
+
+**Other**
+- REST APIs
+- JWT-based authentication
+- Environment-based configuration
+
+---
+
+## 🧱 System Architecture (High-Level)
+
+```
+Frontend (Next.js)
+|
+| REST API
+v
+Backend (FastAPI)
+|
+| Secure DB Access
+v
+Supabase (PostgreSQL + Auth)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🔐 Authentication & Security
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Supabase email/password authentication
+- JWT-based session handling
+- Row Level Security (RLS) at the database level
+- Backend trusts only authenticated requests
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## ⚙️ Key Features
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- User signup and login
+- Skill and interest capture
+- Career path recommendations
+- Clean backend API structure
+- Modular and scalable design
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 📸 Project Screenshots
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 🔹 Backend API (FastAPI + Swagger)
+Shows the implemented REST API endpoints including authentication and profile management.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+![Backend API](./screenshots/api-swagger.png)
+
+---
+
+### 🔹 Frontend (Next.js)
+User-facing interface connected to the backend API.
+
+![Frontend UI](./screenshots/frontend-login.png)
+
+---
+
+### 🔹 Authentication & Users (Supabase)
+Live user authentication using Supabase Auth with real users stored securely.
+
+![Supabase Auth](./screenshots/supabase-auth.png)
+
+---
+
+## 🧠 What I Learned
+
+- Designing RESTful APIs using FastAPI
+- Secure authentication workflows
+- PostgreSQL schema design and RLS policies
+- Structuring full-stack projects for maintainability
+- Translating real-world problems into software systems
+
+---
+
+## 🚧 Project Status
+
+CareerGPS is an **ongoing project**. Planned improvements include:
+- Advanced AI-based recommendations
+- Skill-gap visualizations
+- Resume and learning roadmap generation
+
+---
+
+## ▶️ Getting Started (Development)
+
+This project uses **Next.js** for the frontend.
+
+```bash
+npm install
+npm run dev
+```
+Open http://localhost:3000 to view the app.
+
+🔗 Links
+
+Portfolio: https://github.com/alishabukhari
+
+Repository: https://github.com/alishabukhari/CareerGPS
+
