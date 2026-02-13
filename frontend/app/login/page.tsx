@@ -51,56 +51,50 @@ export default function LoginPage() {
     }
   };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <form
-        onSubmit={handleLogin}
-        className="w-full max-w-md bg-white p-8 rounded-xl shadow-sm border space-y-5"
-      >
-        <h1 className="text-2xl font-semibold text-slate-900">
-          Sign in to CareerGPS
-        </h1>
+ return (
+  <div
+    className="min-h-screen flex items-center justify-center px-6"
+    style={{ backgroundColor: "#D6E6F3" }}
+  >
+    <div
+      className="w-full max-w-md rounded-2xl p-8 shadow-lg"
+      style={{ backgroundColor: "#000026", color: "#EAF2FF" }}
+    >
+      <h1 className="text-2xl font-bold mb-2">Sign in to CareerGPS</h1>
+      <p className="text-sm mb-6 opacity-80">
+        Your personalized AI-powered career roadmap.
+      </p>
 
-        <p className="text-sm text-slate-600">
-          Your personalized AI-powered career roadmap.
-        </p>
+      <form onSubmit={handleLogin} className="space-y-4">
+        <input
+          type="email"
+          placeholder="Email address"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full rounded-lg px-4 py-2 outline-none"
+          style={{ backgroundColor: "#EAF2FF", color: "#000026" }}
+          required
+        />
 
-        <div className="space-y-3">
-          <input
-            type="email"
-            placeholder="Email address"
-            autoComplete="email"           // ✅ important
-            className="w-full rounded-lg border border-slate-300 p-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-
-          <input
-            type="password"
-            placeholder="Password"
-            autoComplete="current-password" // ✅ important
-            className="w-full rounded-lg border border-slate-300 p-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </div>
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full rounded-lg px-4 py-2 outline-none"
+          style={{ backgroundColor: "#EAF2FF", color: "#000026" }}
+          required
+        />
 
         <button
           type="submit"
-          disabled={loading}
-          className="w-full rounded-lg bg-blue-600 py-3 text-white font-medium hover:bg-blue-700 transition disabled:opacity-60"
+          className="w-full py-2 rounded-lg font-semibold text-white"
+          style={{ backgroundColor: "#0F52BA" }}
         >
-          {loading ? "Signing in..." : "Login"}
+          Login
         </button>
-
-        {message && (
-          <p className="text-sm text-center text-red-600">
-            {message}
-          </p>
-        )}
       </form>
     </div>
-  );
+  </div>
+);
 }

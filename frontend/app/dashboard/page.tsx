@@ -100,50 +100,72 @@ export default function DashboardPage() {
       ? profile.interests.split(",").map((i) => i.trim())
       : [];
 
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="max-w-4xl mx-auto px-6 py-12">
-        <h1 className="text-3xl font-semibold text-slate-900">
+ return (
+  <div
+    className="min-h-screen px-6 py-12"
+    style={{ backgroundColor: "#D6E6F3" }} // Ice Blue page
+  >
+    <div className="max-w-4xl mx-auto space-y-8">
+
+      {/* Header Card */}
+      <div
+        className="rounded-2xl p-8 shadow-lg"
+        style={{ backgroundColor: "#000026", color: "#EAF2FF" }} // Deep Navy card
+      >
+        <h1 className="text-3xl font-bold mb-1">
           Welcome, {profile.full_name}
         </h1>
-
-        <p className="text-slate-600 mt-1">
+        <p className="opacity-80">
           Let’s build your career step by step.
         </p>
+      </div>
 
-        {/* Profile Card */}
-        <div className="mt-8 bg-white rounded-xl shadow-sm border p-6 space-y-3">
-          <p>
-            <span className="font-medium text-slate-700">Major:</span>{" "}
-            {profile.major}
-          </p>
+      {/* Profile Card */}
+      <div
+        className="rounded-2xl p-6 shadow-md space-y-2"
+        style={{
+          backgroundColor: "#000026",
+          color: "#EAF2FF",
+          border: "1px solid #A6C5D7",
+        }}
+      >
+        <p>
+          <span className="font-semibold">Major:</span>{" "}
+          {profile.major}
+        </p>
 
-          <p>
-            <span className="font-medium text-slate-700">Interests:</span>{" "}
-            {interestsArray.join(", ")}
-          </p>
-        </div>
+        <p>
+          <span className="font-semibold">Interests:</span>{" "}
+          {interestsArray.join(", ")}
+        </p>
+      </div>
 
-        {/* Actions */}
-        <div className="mt-8 flex gap-4">
-          <button
-            onClick={() => router.push("/roadmap")}
-            className="px-6 py-3 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
-          >
-            View My Career Roadmap →
-          </button>
+      {/* Actions */}
+      <div className="flex gap-4">
+        <button
+          onClick={() => router.push("/roadmap")}
+          className="px-6 py-3 rounded-xl font-semibold text-white transition hover:opacity-90"
+          style={{ backgroundColor: "#0F52BA" }} // Sapphire
+        >
+          View My Career Roadmap →
+        </button>
 
-          <button
-            onClick={() => {
-              removeToken();
-              router.push("/login");
-            }}
-            className="px-6 py-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition"
-          >
-            Logout
-          </button>
-        </div>
+        <button
+          onClick={() => {
+            removeToken();
+            router.push("/login");
+          }}
+          className="px-6 py-3 rounded-xl font-semibold transition"
+          style={{
+            border: "1px solid #000026",
+            color: "#000026",
+            backgroundColor: "transparent",
+          }}
+        >
+          Logout
+        </button>
       </div>
     </div>
-  );
+  </div>
+);
 }

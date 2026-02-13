@@ -120,6 +120,74 @@ def get_completed(current_user=Depends(get_current_user)):
 
     return {"completed": [r["task_title"] for r in rows.data]}
 
+@router.get("/stats")
+def get_stats(current_user=Depends(get_current_user)):
+    user_id = current_user["id"]
+
+    # get roadmap
+    saved = _get_saved_roadmap(supabase, user_id, "Junior Frontend Developer")
+    if not saved.data:
+        return {"total": 0, "completed": 0, "percent": 0}
+
+    roadmap = saved.data[0]["roadmap_json"]
+
+    all_items = []
+    for phase in roadmap["phases"]:
+        for item in phase["items"]:
+            all_items.append(item["title"])
+
+    total = len(all_items)
+
+    rows = (
+        supabase.table("roadmap_progress")
+        .select("task_title")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    completed_titles = [r["task_title"] for r in rows.data]
+    completed_count = len(set(completed_titles) & set(all_items))
+
+    percent = int((completed_count / total) * 100) if total > 0 else 0
+
+    return {
+        "total": total,
+        "completed": completed_count,
+        "percent": percent
+    }
+
+@router.get("/today")
+def get_today_focus(current_user=Depends(get_current_user)):
+    user_id = current_user["id"]
+    target_role = "Junior Frontend Developer"
+
+    saved = _get_saved_roadmap(supabase, user_id, target_role)
+    if not saved.data:
+        return {"task": None}
+
+    roadmap = saved.data[0]["roadmap_json"]
+
+    rows = (
+        supabase.table("roadmap_progress")
+        .select("task_title")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    completed_titles = set([r["task_title"] for r in rows.data])
+
+    for phase in roadmap["phases"]:
+        for item in phase["items"]:
+            if item["title"] not in completed_titles:
+                return {
+                    "title": item["title"],
+                    "phase": phase["phase"],
+                    "why": item["why"],
+                    "type": item["type"],
+                    "estimated_weeks": item["estimated_weeks"],
+                }
+
+    return {"task": None}
+
 
 @router.post("/generate")
 def generate_roadmap(current_user=Depends(get_current_user)):
@@ -165,3 +233,4 @@ def complete_task(body: CompleteTaskRequest, current_user=Depends(get_current_us
     )
 
     return {"completed": [r["task_title"] for r in rows.data]}
+
