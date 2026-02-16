@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { getToken } from "@/lib/auth";
 import { theme } from "@/styles/theme";
+import { useRequireProfile } from "@/lib/useRequiredProfile";
 
 const currentTheme = theme.experimental;
 
@@ -38,6 +39,7 @@ export default function RoadmapPage() {
   const [completed, setCompleted] = useState<string[]>([]);
   const [stats, setStats] = useState<{ completed: number; total: number; percent: number } | null>(null);
   const [today, setToday] = useState<any>(null);
+
 
   const parseRoadmap = (raw: any): Roadmap => {
     if (typeof raw === "string") return JSON.parse(raw);

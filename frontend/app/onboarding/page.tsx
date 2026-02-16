@@ -63,7 +63,7 @@ export default function OnboardingPage() {
 
         if (!res.ok) throw new Error("Failed to save profile");
 
-        router.push("/dashboard");
+        router.push("/home");
       } catch (err) {
         setError("Something went wrong. Please try again.");
       } finally {

@@ -10,9 +10,46 @@ __pycache__/
 .venv/
 .env
 .env.*
+*.pyo
+*.pyd
+venv/
+venv/
+backend/venv/
 
 # OS / Editors
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+
+# Python virtualenv
+venv/
+.venv/
+backend/venv/
+
+__pycache__/
+*.pyc
+
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+.
+
+# VS Code / IDE
+.vscode/
+.idea/
+
+# Python virtualenv
+venv/
+.venv/
+backend/venv/
+
+__pycache__/
+*.pyc
+
 .vscode/
 .idea/

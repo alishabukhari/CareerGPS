@@ -1,9 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from app.auth.deps import get_current_user
 from app.utils.supabase_client import get_supabase_admin
 from pydantic import BaseModel
 from datetime import datetime
+from typing import List, Literal, AsyncGenerator, Optional
+import asyncio
 import json
+import os
+from openai import OpenAI
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+print("OPENAI_API_KEY loaded:", bool(os.getenv("OPENAI_API_KEY")))
 
 class CompleteTaskRequest(BaseModel):
     title: str
@@ -12,6 +21,16 @@ router = APIRouter(prefix="/roadmap", tags=["roadmap"])
 supabase = get_supabase_admin()
 
 TARGET_ROLE = "Junior Frontend Developer"
+
+class ChatMsg(BaseModel):
+    role: Literal["user", "assistant", "system"]
+    content: str
+
+class TopicChatRequest(BaseModel):
+    topic_title: Optional[str] = None
+    topic_slug: Optional[str] = None
+    messages: List[ChatMsg]
+    mode: Optional[str] = None
 
 # ======================
 # Helpers
@@ -42,8 +61,45 @@ def _save_roadmap(user_id: str, roadmap_dict: dict):
     )
 
 def generate_ai_explanation(title: str):
-    return f"This is an AI-generated explanation for {title}. You will replace this with OpenAI later."
+    try:
+        prompt = f"""
+Explain the topic '{title}' to a beginner frontend developer.
+Return ONLY valid JSON in this exact format (no extra text, no markdown):
 
+{{
+  "explanation": "short beginner-friendly explanation",
+  "checklist": ["task 1", "task 2", "task 3"]
+}}
+"""
+
+        res = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.6,
+        )
+
+        content = res.choices[0].message.content.strip()
+
+        # 🔥 Extract JSON safely if model adds text
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        json_str = content[start:end]
+
+        data = json.loads(json_str)
+
+        return data["explanation"], data["checklist"]
+
+    except Exception as e:
+        print("❌ OpenAI error:", e)
+        return (
+            f"This topic teaches core concepts of {title}. Practice by building small examples.",
+            [
+                f"Read docs on {title}",
+                f"Build a small demo using {title}",
+                f"Write notes on {title}",
+            ],
+        )
+    
 def _generate_roadmap():
     return {
         "target_role": TARGET_ROLE,
@@ -213,17 +269,44 @@ def get_topic_detail(title: str, current_user=Depends(get_current_user)):
     for phase in roadmap["phases"]:
         for item in phase["items"]:
             if item["title"].strip().lower() == clean_title:
+
+                # ✅ Check cache
+                cached = (
+                    supabase.table("topic_ai_cache")
+                    .select("*")
+                    .eq("title", item["title"])
+                    .limit(1)
+                    .execute()
+                )
+
+                if cached.data:
+                    row = cached.data[0]
+                    return {
+                        "title": item["title"],
+                        "phase": phase["phase"],
+                        "why": item.get("why", ""),
+                        "estimated_weeks": item["estimated_weeks"],
+                        "explanation": row["explanation"],
+                        "checklist": row["checklist"],
+                    }
+
+                # 🤖 Generate AI
+                explanation, checklist = generate_ai_explanation(item["title"])
+
+                # 💾 Cache result
+                supabase.table("topic_ai_cache").insert({
+                    "title": item["title"],
+                    "explanation": explanation,
+                    "checklist": checklist,
+                }).execute()
+
                 return {
                     "title": item["title"],
                     "phase": phase["phase"],
                     "why": item.get("why", ""),
                     "estimated_weeks": item["estimated_weeks"],
-                    "explanation": generate_ai_explanation(item["title"]),
-                    "checklist": [
-                        f"Read about {item['title']}",
-                        f"Build a small demo using {item['title']}",
-                        f"Write notes on {item['title']}",
-                    ],
+                    "explanation": explanation,
+                    "checklist": checklist,
                 }
 
     raise HTTPException(status_code=404, detail="Topic not found")
@@ -256,6 +339,18 @@ def get_next_topic(title: str, current_user=Depends(get_current_user)):
 
     return {"next": flat[idx + 1]}
 
+@router.get("/topic/chat")
+def get_topic_chat(title: str, current_user=Depends(get_current_user)):
+    rows = (
+        supabase.table("topic_chat_messages")
+        .select("role, content")
+        .eq("user_id", current_user["id"])
+        .eq("topic_title", title)
+        .order("created_at")
+        .execute()
+    )
+
+    return {"messages": rows.data or []}
 
 @router.post("/complete")
 def complete_task(body: CompleteTaskRequest, current_user=Depends(get_current_user)):
@@ -290,3 +385,97 @@ def complete_task(body: CompleteTaskRequest, current_user=Depends(get_current_us
     )
 
     return {"completed": [r["task_title"] for r in rows.data]}
+
+@router.post("/topic/ai")
+async def topic_ai_chat(
+    payload: TopicChatRequest,
+    current_user=Depends(get_current_user)
+):
+    if not payload.messages:
+        raise HTTPException(status_code=400, detail="messages required")
+
+    topic = payload.topic_title or payload.topic_slug or "this topic"  # ✅ OK
+
+    system_prompt = (
+        f"You are a friendly learning assistant for the topic: {topic}. "
+        "Give clear, short explanations, examples, and next steps. "
+        "Use bullet points when helpful."
+    )
+
+    if payload.mode == "eli5":  # ✅ OK (your ELI5 mode stays)
+        system_prompt += " Explain everything like I am 5 years old. Use very simple words and short sentences."
+
+    async def sse_stream() -> AsyncGenerator[bytes, None]:
+        yield b"data: \n\n"
+        await asyncio.sleep(0.05)
+
+        messages = [{"role": "system", "content": system_prompt}] + [
+            {"role": m.role, "content": m.content} for m in payload.messages
+        ]
+
+        full_response_text = ""  # 🔧 CHANGE: collect full AI response
+
+        stream = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=messages,
+            temperature=0.6,
+            stream=True,
+        )
+
+        for chunk in stream:
+            try:
+                delta = getattr(chunk.choices[0].delta, "content", None)
+                if delta:
+                    full_response_text += delta  # 🔧 CHANGE: append streamed text
+                    yield f"data: {delta}\n\n".encode("utf-8")
+                    await asyncio.sleep(0)
+            except Exception as e:
+                print("Streaming chunk error:", e)
+
+        # 🔧 CHANGE: persist BOTH user + assistant messages
+        supabase.table("topic_chat_messages").insert([
+            {
+                "user_id": current_user["id"],
+                "topic_title": topic,  # 🔧 CHANGE: use resolved topic (not payload.topic_title)
+                "role": "user",
+                "content": payload.messages[-1].content,
+            },
+            {
+                "user_id": current_user["id"],
+                "topic_title": topic,  # 🔧 CHANGE
+                "role": "assistant",
+                "content": full_response_text,  # 🔧 CHANGE: save streamed result
+            }
+        ]).execute()
+
+        yield b"data: [DONE]\n\n"
+
+    return StreamingResponse(
+        sse_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
+
+@router.post("/topic/react")
+def react_to_message(
+    payload: dict,
+    current_user=Depends(get_current_user)
+):
+    topic_title = payload.get("topic_title")
+    message = payload.get("message")
+    reaction = payload.get("reaction")
+
+    if not topic_title or not message or reaction not in ["like", "dislike"]:
+        raise HTTPException(status_code=400, detail="Invalid reaction payload")
+
+    # Upsert reaction (like/dislike toggle)
+    supabase.table("topic_chat_reactions").insert({
+    "user_id": current_user["id"],
+    "topic_title": payload.topic_title,
+    "message": payload.message,
+    "reaction": payload.reaction,
+}).execute()
+    return {"status": "ok", "reaction": reaction}

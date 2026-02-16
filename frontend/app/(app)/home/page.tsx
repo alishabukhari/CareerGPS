@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { useRequireProfile } from "@/lib/useRequiredProfile";
 
 export default function HomePage() {
   const router = useRouter();

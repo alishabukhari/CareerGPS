@@ -35,8 +35,7 @@ export default function SignupPage() {
       }
 
       setMessage("✅ Signup successful!");
-      setEmail("");
-      setPassword("");
+      router.push("/onboarding");
     } catch (err: any) {
       setMessage(`❌ ${err.message}`);
     } finally {
