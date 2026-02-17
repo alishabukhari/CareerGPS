@@ -29,8 +29,16 @@ class ChatMsg(BaseModel):
 class TopicChatRequest(BaseModel):
     topic_title: Optional[str] = None
     topic_slug: Optional[str] = None
+    session_id: Optional[str] = None
     messages: List[ChatMsg]
     mode: Optional[str] = None
+
+class CreateChatSessionRequest(BaseModel):
+    topic_title: str
+    preview_title: Optional[str] = None  
+
+class RenameChatSessionRequest(BaseModel):
+    title: str      
 
 # ======================
 # Helpers
@@ -340,17 +348,41 @@ def get_next_topic(title: str, current_user=Depends(get_current_user)):
     return {"next": flat[idx + 1]}
 
 @router.get("/topic/chat")
-def get_topic_chat(title: str, current_user=Depends(get_current_user)):
-    rows = (
+def get_topic_chat(
+    title: str,
+    session_id: Optional[str] = None,
+    current_user=Depends(get_current_user)
+):
+    q = (
         supabase.table("topic_chat_messages")
         .select("role, content")
         .eq("user_id", current_user["id"])
         .eq("topic_title", title)
         .order("created_at")
+    )
+
+    if session_id:
+        q = q.eq("session_id", session_id)
+
+    rows = q.execute()
+
+    return {"messages": rows.data or []}
+
+@router.get("/topic/chat/sessions")
+def list_chat_sessions(
+    topic_title: str,
+    current_user=Depends(get_current_user)
+):
+    rows = (
+        supabase.table("chat_sessions")
+        .select("*")
+        .eq("user_id", current_user["id"])
+        .eq("topic_title", topic_title)
+        .order("created_at", desc=True)
         .execute()
     )
 
-    return {"messages": rows.data or []}
+    return {"sessions": rows.data or []}
 
 @router.post("/complete")
 def complete_task(body: CompleteTaskRequest, current_user=Depends(get_current_user)):
@@ -436,17 +468,49 @@ async def topic_ai_chat(
         supabase.table("topic_chat_messages").insert([
             {
                 "user_id": current_user["id"],
-                "topic_title": topic,  # 🔧 CHANGE: use resolved topic (not payload.topic_title)
+                "topic_title": topic,
+                "session_id": payload.session_id,
                 "role": "user",
                 "content": payload.messages[-1].content,
             },
             {
                 "user_id": current_user["id"],
-                "topic_title": topic,  # 🔧 CHANGE
+                "topic_title": topic,
+                "session_id": payload.session_id,
                 "role": "assistant",
-                "content": full_response_text,  # 🔧 CHANGE: save streamed result
+                "content": full_response_text,
             }
         ]).execute()
+
+        # 🧠 Auto-title if session still has default title
+        if payload.session_id:
+            session = (
+                supabase.table("chat_sessions")
+                .select("preview_title")
+                .eq("id", payload.session_id)
+                .single()
+                .execute()
+            )
+
+            if session.data and session.data.get("preview_title") in ["New chat", None]:
+                title_prompt = f"Generate a short 3-5 word title for this conversation:\n{full_response_text[:300]}"
+
+                title_res = client.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=[{"role": "user", "content": title_prompt}],
+                    temperature=0.3,
+                )
+
+                auto_title = (
+                    title_res.choices[0].message.content
+                    .strip()
+                    .replace('"', "")
+                )
+
+                supabase.table("chat_sessions") \
+                    .update({"preview_title": auto_title}) \
+                    .eq("id", payload.session_id) \
+                    .execute()
 
         yield b"data: [DONE]\n\n"
 
@@ -479,3 +543,93 @@ def react_to_message(
     "reaction": payload.reaction,
 }).execute()
     return {"status": "ok", "reaction": reaction}
+
+@router.post("/topic/chat/session")
+def create_chat_session(
+    payload: CreateChatSessionRequest,
+    current_user=Depends(get_current_user)
+):
+    user_id = current_user["id"]
+
+    row = (
+        supabase.table("chat_sessions")
+        .insert({
+            "user_id": user_id,
+            "topic_title": payload.topic_title,
+            "preview_title": payload.preview_title or "New chat",
+        })
+        .execute()
+    )
+
+    return {"session": row.data[0]}
+
+@router.post("/topic/chat/session/pin/{session_id}")
+def toggle_pin_chat_session(session_id: str, current_user=Depends(get_current_user)):
+    user_id = current_user["id"]
+
+    row = supabase.table("chat_sessions") \
+        .select("pinned") \
+        .eq("id", session_id) \
+        .eq("user_id", user_id) \
+        .single() \
+        .execute()
+
+    new_val = not (row.data.get("pinned") if row.data else False)
+
+    supabase.table("chat_sessions") \
+        .update({ "pinned": new_val }) \
+        .eq("id", session_id) \
+        .eq("user_id", user_id) \
+        .execute()
+
+    return { "pinned": new_val }
+
+@router.delete("/topic/chat/session/{session_id}")
+def delete_chat_session(session_id: str, current_user=Depends(get_current_user)):
+    user_id = current_user["id"]
+
+    # 1️⃣ Delete all messages under this session
+    supabase.table("topic_chat_messages") \
+        .delete() \
+        .eq("session_id", session_id) \
+        .eq("user_id", user_id) \
+        .execute()
+
+    # 2️⃣ Delete the session itself
+    supabase.table("chat_sessions") \
+        .delete() \
+        .eq("id", session_id) \
+        .eq("user_id", user_id) \
+        .execute()
+
+    return {"status": "deleted", "session_id": session_id}
+
+@router.delete("/topic/chat/sessions")
+def delete_all_chat_sessions(topic_title: str, current_user=Depends(get_current_user)):
+    user_id = current_user["id"]
+
+    # 1️⃣ Delete all messages for this topic
+    supabase.table("topic_chat_messages") \
+        .delete() \
+        .eq("user_id", user_id) \
+        .eq("topic_title", topic_title) \
+        .execute()
+
+    # 2️⃣ Delete all sessions for this topic
+    supabase.table("chat_sessions") \
+        .delete() \
+        .eq("user_id", user_id) \
+        .eq("topic_title", topic_title) \
+        .execute()
+
+    return {"status": "deleted_all"}
+
+@router.put("/topic/chat/session/{session_id}")
+def rename_chat_session(session_id: str, payload: RenameChatSessionRequest, current_user=Depends(get_current_user)):
+    supabase.table("chat_sessions") \
+        .update({ "preview_title": payload.title }) \
+        .eq("id", session_id) \
+        .eq("user_id", current_user["id"]) \
+        .execute()
+
+    return { "status": "renamed" }

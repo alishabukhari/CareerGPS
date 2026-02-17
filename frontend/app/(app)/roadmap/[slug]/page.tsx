@@ -22,6 +22,13 @@ type ChatMessage = {
   content: string;
 };
 
+type ChatSession = {
+  id: string;
+  preview_title: string | null;
+  created_at: string;
+  is_pinned?: boolean;
+};
+
 export default function TopicDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -39,13 +46,19 @@ export default function TopicDetailPage() {
   const [openLearn, setOpenLearn] = useState(true);
   const [openPractice, setOpenPractice] = useState(true);
   const [openPortfolio, setOpenPortfolio] = useState(true);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [showCopied, setShowCopied] = useState(false);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const hasFetched = useRef(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (hasFetched.current) return;
@@ -91,6 +104,26 @@ export default function TopicDetailPage() {
     loadTopic();
     loadChatHistory();
   }, [slug, router]);
+
+  // AUTO-SCROLL when messages change or streaming updates
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isStreaming]);
+
+  // AUTO-SCROLL when AI panel opens
+  useEffect(() => {
+    if (showAI) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+      }, 50);
+    }
+  }, [showAI]);
+
+  useEffect(() => {
+    const close = () => setOpenMenuId(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, []);
 
   const markComplete = async () => {
     const token = getToken();
@@ -154,89 +187,166 @@ export default function TopicDetailPage() {
   }
 };
 
-  const streamTopicAI = async (userText: string) => {
-    if (!userText.trim() || isStreaming) return;
+const streamTopicAI = async (userText: string) => {
+  if (!userText.trim() || isStreaming) return;
 
-    const token = getToken();
-    if (!token) return;
+  const token = getToken();
+  if (!token) return;
 
-    const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: userText.trim(),
-    };
+  const userMsg: ChatMessage = {
+    id: crypto.randomUUID(),
+    role: "user",
+    content: userText.trim(),
+  };
 
-    setMessages((prev) => [...prev, userMsg]);
-    setChatInput("");
-    setIsStreaming(true);
+  setMessages((prev) => [...prev, userMsg]);
+  setChatInput("");
+  setIsStreaming(true);
 
-    const assistantId = crypto.randomUUID();
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "" },
-    ]);
+  const assistantId = crypto.randomUUID();
+  setMessages((prev) => [
+    ...prev,
+    { id: assistantId, role: "assistant", content: "" },
+  ]);
 
-    try {
-      const res = await fetch(`${API_URL}/roadmap/topic/ai`, {
+  try {
+    let sessionId = activeSessionId;
+
+    // 🔥 CREATE SESSION IF THIS IS A NEW CHAT
+    if (!sessionId) {
+      const res = await fetch(`${API_URL}/roadmap/topic/chat/session`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          topic_title: topic.title,
-          messages: [
-            ...messages.map((m) => ({ role: m.role, content: m.content })),
-            { role: "user", content: userMsg.content },
-          ],
+          topic_title: slug,               // topic
+          preview_title: userMsg.content, // first user message as title
         }),
       });
 
-      if (!res.ok || !res.body) throw new Error("AI failed");
+      const data = await res.json();
+      sessionId = data.session.id;
+      setActiveSessionId(sessionId);
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-
-      let buffer = "";
-      let done = false;
-
-      while (!done) {
-        const { value, done: doneReading } = await reader.read();
-        done = doneReading;
-
-        buffer += decoder.decode(value || new Uint8Array(), { stream: true });
-
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith("data:")) continue;
-
-          const data = line.replace(/^data:\s?/, "");
-          if (data === "[DONE]") break;
-
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: m.content + data }
-                : m
-            )
-          );
-        }
-      }
-    } catch {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.role === "assistant" && m.content === ""
-            ? { ...m, content: "⚠️ AI failed. Try again." }
-            : m
-        )
-      );
-    } finally {
-      setIsStreaming(false);
+      // refresh history list
+      loadChatSessions();
     }
-  };
+
+    const res = await fetch(`${API_URL}/roadmap/topic/ai`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        topic_title: slug,
+        session_id: sessionId,   // ✅ guaranteed now
+        messages: [
+          ...messages.map((m) => ({ role: m.role, content: m.content })),
+          { role: "user", content: userMsg.content },
+        ],
+      }),
+    });
+
+    if (!res.ok || !res.body) throw new Error("AI failed");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+
+    let buffer = "";
+    let done = false;
+
+    while (!done) {
+      const { value, done: doneReading } = await reader.read();
+      done = doneReading;
+
+      buffer += decoder.decode(value || new Uint8Array(), { stream: true });
+
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+
+        const data = line.replace(/^data:\s?/, "");
+        if (data === "[DONE]") break;
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: m.content + data }
+              : m
+          )
+        );
+      }
+    }
+  } catch {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.role === "assistant" && m.content === ""
+          ? { ...m, content: "⚠️ AI failed. Try again." }
+          : m
+      )
+    );
+  } finally {
+    setIsStreaming(false);
+  }
+};
+
+  const loadChatSessions = async () => {
+  const token = getToken();
+  if (!token || !topic?.title) return;
+
+  try {
+    setLoadingSessions(true);
+
+    const res = await fetch(
+      `${API_URL}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    if (!res.ok) throw new Error("Failed to load sessions");
+
+    const data = await res.json();
+    setChatSessions(data.sessions || []);
+  } catch (e) {
+    console.error("Failed to load sessions");
+    setChatSessions([]);
+  } finally {
+    setLoadingSessions(false);
+  }
+};
+
+const groupSessionsByDate = (sessions: any[]) => {
+  const groups: Record<string, any[]> = {};
+
+  const today = new Date().toDateString();
+  const yesterday = new Date(Date.now() - 86400000).toDateString();
+
+  const sorted = [...sessions].sort((a, b) => {
+    if (a.is_pinned && !b.is_pinned) return -1;
+    if (!a.is_pinned && b.is_pinned) return 1;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
+  sorted.forEach((s) => {
+    const dateStr = new Date(s.created_at).toDateString();
+
+    let label = "Older";
+    if (dateStr === today) label = "Today";
+    else if (dateStr === yesterday) label = "Yesterday";
+
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(s);
+  });
+
+  return groups;
+};
 
 return (
   <div className="w-full relative">
@@ -287,7 +397,7 @@ return (
           </p>
 
           <button
-            onClick={() => { setShowAI(true); setAiMode("chat"); }}
+            onClick={() => { setShowAI(true); setAiMode("chat"); loadChatSessions(); setActiveSessionId(null); setMessages([]); }}
             className="mt-4 bg-white text-blue-600 px-4 py-2 rounded-lg text-xs font-semibold hover:scale-[1.04] transition flex items-center gap-2"
           >
             <img src="/bluesparkle.png" className="w-6 h-6" />
@@ -374,7 +484,7 @@ return (
         </div>
 
         {/* Bottom CTA */}
-        <div className="rounded-2xl p-4 bg-blue-50 border border-blue-300 flex gap-4">
+          <div className="rounded-2xl p-6 bg-blue-50 border border-blue-300 flex justify-center gap-6">
           <motion.button
             whileHover={{ scale: 1.03 }}
             onClick={markComplete}
@@ -405,28 +515,198 @@ return (
             exit={{ x: 80, opacity: 0 }}
             className="fixed right-0 top-0 h-screen w-[460px] bg-[#EEF5FF] border-l border-blue-300 shadow-xl z-40 flex flex-col"
           >
-            <div className="bg-blue-600 p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <motion.img
-                  src="/whitebot.png"
-                  className="w-14 h-14"
-                  animate={{ y: [-4, 4, -4] }}
-                  transition={{ repeat: Infinity, duration: 2 }}
-                />
-                <div>
-                  <p className="font-semibold text-white text-sm">AI Learning Assistant</p>
-                  <p className="text-xs text-white/80">Always here to help you learn</p>
+            <div className="bg-blue-600 p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <motion.img
+                    src="/whitebot.png"
+                    className="w-14 h-14"
+                    animate={{ y: [-4, 4, -4] }}
+                    transition={{ repeat: Infinity, duration: 2 }}
+                  />
+                  <div>
+                    <p className="font-semibold text-white text-sm">
+                      AI Learning Assistant
+                    </p>
+                    <p className="text-xs text-white/80">
+                      Always here to help you learn
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-center">
+                  <button
+                    onClick={() => setShowHistory((v) => !v)}
+                    className="text-white/90 hover:text-white text-xs border border-white/40 px-3 py-1 rounded-full hover:bg-white/20 transition"
+                  >
+                    {showHistory ? "Hide history ▲" : "Show history ▼"}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveSessionId(null);
+                      setMessages([]);
+                    }}
+                    className="text-white text-xs border border-white/40 px-3 py-1 rounded-full hover:bg-white/20 transition"
+                  >
+                    + New Chat
+                  </button>
+
+                  <button
+                    onClick={() => setShowAI(false)}
+                    className="text-white transition-transform duration-700 hover:rotate-90"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={() => setShowAI(false)}
-                className="text-white transition-transform duration-700 hover:rotate-90"
-              >
-                ✕
-              </button>
             </div>
 
-            <div className="flex-1 p-4 overflow-y-auto space-y-4 text-sm">
+              {showHistory && chatSessions.length > 0 && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="border-b border-blue-200 p-3 text-xs space-y-3 overflow-hidden bg-white/70 max-h-[240px] overflow-y-auto"
+                >
+                  <button
+                    onClick={async () => {
+                      const token = getToken();
+                      if (!token) return;
+
+                      const ok = confirm("Delete ALL chats for this topic? This cannot be undone.");
+                      if (!ok) return;
+
+                      await fetch(
+                        `${API_URL}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
+                        {
+                          method: "DELETE",
+                          headers: { Authorization: `Bearer ${token}` },
+                        }
+                      );
+
+                      setActiveSessionId(null);
+                      setMessages([]);
+                      loadChatSessions();
+                    }}
+                    className="mb-2 text-[11px] text-red-600 hover:underline"
+                  >
+                    🗑️ Delete all chats for this topic
+                  </button>
+
+                  {Object.entries(groupSessionsByDate(chatSessions)).map(([label, sessions]) => (
+                   <div key={label}>
+                    <p className="font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                      {label}
+                    </p>
+
+                    <div className="space-y-1">
+                      {(sessions as ChatSession[]).map((s) => (
+                        <div
+                          key={s.id}
+                          className={`group flex items-center justify-between w-full px-3 py-2 rounded-lg hover:bg-blue-100 transition ${
+                            activeSessionId === s.id ? "bg-blue-100" : ""
+                          } ${s.is_pinned ? "border border-yellow-300/50 bg-yellow-50/40" : ""}`}
+                        >
+                          {/* LEFT: click to open chat */}
+                          <button
+                            onClick={async () => {
+                              setActiveSessionId(s.id);
+
+                              const token = getToken();
+                              const res = await fetch(
+                                `${API_URL}/roadmap/topic/chat?title=${encodeURIComponent(
+                                  topic.title
+                                )}&session_id=${s.id}`,
+                                { headers: { Authorization: `Bearer ${token}` } }
+                              );
+
+                              const data = await res.json();
+                              setMessages(data.messages || []);
+                            }}
+                            className="flex-1 text-left"
+                          >
+                            <p className="font-medium text-slate-700 truncate flex items-center gap-2">
+                              {s.is_pinned && <img src="/pin.png" className="w-4 h-4" />}
+                              {s.preview_title || "Chat Session"}
+                            </p>
+
+                            <p className="text-[10px] text-slate-400">
+                              {new Date(s.created_at).toLocaleTimeString()}
+                            </p>
+                          </button>
+
+                          {/* RIGHT: 3 dots menu */}
+                          <div className="relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMenuId(openMenuId === s.id ? null : s.id);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-slate-800 transition px-2"
+                            >
+                              ⋯
+                            </button>
+
+                            {openMenuId === s.id && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className="absolute right-0 top-7 z-50 w-40 bg-white rounded-lg shadow-lg border text-xs overflow-hidden"
+                              >
+                                <button
+                                  onClick={async () => {
+                                    const token = getToken();
+                                    await fetch(
+                                      `${API_URL}/roadmap/topic/chat/session/pin/${s.id}`,
+                                      { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+                                    );
+
+                                    setOpenMenuId(null);
+                                    loadChatSessions();
+                                  }}
+                                  className="flex items-center gap-2 w-full px-3 py-2 hover:bg-blue-50 text-left"
+                                >
+                                  <img src="/pin.png" className="w-4 h-4" />
+                                  {s.is_pinned ? "Unpin chat" : "Pin chat"}
+                                </button>
+
+                                <button
+                                  onClick={async () => {
+                                    const token = getToken();
+                                    await fetch(`${API_URL}/roadmap/topic/chat/session/${s.id}`, {
+                                      method: "DELETE",
+                                      headers: { Authorization: `Bearer ${token}` },
+                                    });
+
+                                    setOpenMenuId(null);
+                                    loadChatSessions();
+
+                                    if (activeSessionId === s.id) {
+                                      setActiveSessionId(null);
+                                      setMessages([]);
+                                    }
+                                  }}
+                                  className="flex items-center gap-2 w-full px-3 py-2 hover:bg-red-50 text-red-600 text-left"
+                                >
+                                  <img src="/bin.png" className="w-4 h-4" />
+                                  Delete chat
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  ))}
+                </motion.div>
+              )}
+
+            <motion.div
+              layout
+              transition={{ duration: 0.25, ease: "easeInOut" }}
+              className="flex-1 p-4 overflow-y-auto space-y-4 text-sm scroll-smooth"
+            >
               {messages.map((m, i) => (
                 <div
                   key={m.id || `${m.role}-${i}`}
@@ -440,16 +720,19 @@ return (
 
                   <div className="flex flex-col max-w-[75%]">
                     <div
-                      className={`px-4 py-2 rounded-2xl inline-block w-fit break-words ${
+                      className={`px-4 py-3 rounded-2xl inline-block w-fit break-words whitespace-pre-line leading-relaxed ${
                         m.role === "assistant"
                           ? "bg-blue-600 text-white"
                           : "bg-white border text-slate-800"
-                      }`}
+                    }`}
                     >
-                      {m.content}
-                      {isStreaming && m.role === "assistant" && (
-                        <span className="inline-block ml-1 animate-pulse">|</span>
-                      )}
+                      {m.content || (isStreaming && m.role === "assistant" && (
+                        <div className="flex items-center gap-1 h-5">
+                         <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:0ms]" />
+                         <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:150ms]" />
+                         <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:300ms]" />
+                        </div>
+                      ))}
                     </div>
 
                     {m.role === "assistant" && !isStreaming && (
@@ -508,12 +791,8 @@ return (
                 </div>
               ))}
 
-              {isStreaming && (
-                <div className="text-xs text-blue-600 animate-pulse">
-                  AI is typing…
-                </div>
-              )}
-            </div>
+              <div ref={messagesEndRef} />
+            </motion.div>
             
             {showCopied && (
               <div className="absolute bottom-16 right-6 bg-black/80 text-white text-xs px-3 py-1 rounded-full shadow-lg animate-pulse">
