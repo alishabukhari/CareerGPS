@@ -10,7 +10,11 @@ def get_current_user(
     token = credentials.credentials
 
     supabase = get_supabase_anon()
-    res = supabase.auth.get_user(token)
+
+    try:
+        res = supabase.auth.get_user(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     if not res or not res.user:
         raise HTTPException(status_code=401, detail="Invalid token")

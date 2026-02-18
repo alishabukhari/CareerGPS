@@ -10,9 +10,21 @@ export default function OnboardingPage() {
   const [fullName, setFullName] = useState("");
   const [major, setMajor] = useState("");
   const [interests, setInterests] = useState("");
+  const [role, setRole] = useState<string>("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [customRole, setCustomRole] = useState<string>("");
+
+  const ROLES = [
+    "Frontend Engineer",
+    "Backend Engineer",
+    "Full Stack Engineer",
+    "AI Engineer",
+    "Embedded / Computer Engineer",
+    "Other",
+  ];
 
   const handleNext = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,15 +49,29 @@ export default function OnboardingPage() {
     }
 
     if (step === 3) {
+      if (!role) {
+        setError("Please select your target role.");
+        return;
+      }
+
+      if (role === "Other" && !customRole.trim()) {
+        setError("Please enter your field or career goal.");
+        return;
+      }
+
+      const finalRole = role === "Other" ? customRole.trim() : role;
+
       setLoading(true);
       const token = getToken();
+
       if (!token) {
         router.push("/login");
         return;
       }
 
       try {
-        const res = await fetch("http://localhost:8000/profile", {
+        // 1️⃣ Save profile
+        const profileRes = await fetch("http://127.0.0.1:8000/profile", {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -61,11 +87,30 @@ export default function OnboardingPage() {
           }),
         });
 
-        if (!res.ok) throw new Error("Failed to save profile");
+        if (!profileRes.ok) {
+          const err = await profileRes.json();
+          throw new Error(err.detail || "Failed to save profile");
+        }
 
-        router.push("/home");
-      } catch (err) {
-        setError("Something went wrong. Please try again.");
+        // 2️⃣ Initialize roadmap by role (AI)
+        const roadmapRes = await fetch("http://127.0.0.1:8000/roadmap/init", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ target_role: finalRole }),
+        });
+
+        if (!roadmapRes.ok) {
+          const err = await roadmapRes.json();
+          throw new Error(err.detail || "Failed to generate roadmap");
+        }
+
+        // 3️⃣ Go to roadmap
+        router.push("/roadmap");
+      } catch (err: any) {
+        setError(err.message || "Something went wrong. Please try again.");
       } finally {
         setLoading(false);
       }
@@ -74,7 +119,6 @@ export default function OnboardingPage() {
 
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center px-6 bg-[#EAF4FB] overflow-hidden">
-      {/* 🔥 Background Image */}
       <img
         src="/first.png"
         alt=""
@@ -82,10 +126,7 @@ export default function OnboardingPage() {
         style={{ filter: "hue-rotate(200deg) saturate(0.7)", opacity: 0.05 }}
       />
 
-      {/* Content */}
       <div className="relative z-10 w-full flex flex-col items-center">
-
-        {/* Top pill */}
         <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-blue-100 px-4 py-1 text-xs font-medium text-blue-600">
           ✨ Let’s personalize your journey
         </span>
@@ -97,7 +138,6 @@ export default function OnboardingPage() {
           Tell us about yourself so we can create a personalized roadmap
         </p>
 
-        {/* Steps */}
         <div className="flex items-center gap-6 mb-8 text-xs">
           {[1, 2, 3].map((n) => (
             <div
@@ -115,12 +155,11 @@ export default function OnboardingPage() {
               >
                 {n}
               </span>
-              {n === 1 ? "About You" : n === 2 ? "Your Field" : "Interests"}
+              {n === 1 ? "About You" : n === 2 ? "Your Field" : "Your Goal"}
             </div>
           ))}
         </div>
 
-        {/* Card */}
         <div
           className="w-full max-w-xl rounded-2xl p-8 shadow-xl"
           style={{ backgroundColor: "#1F2A3A", color: "#EAF2FF" }}
@@ -159,8 +198,41 @@ export default function OnboardingPage() {
             )}
 
             {step === 3 && (
-              <div>
+              <div className="space-y-3">
                 <label className="block text-xs mb-1 opacity-80">
+                  Choose your target role
+                </label>
+
+                {ROLES.map((r) => (
+                  <label
+                    key={r}
+                    className={`flex items-center gap-2 cursor-pointer rounded-lg px-3 py-2 ${
+                      role === r ? "bg-blue-600/20" : "bg-white/10"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="role"
+                      value={r}
+                      checked={role === r}
+                      onChange={() => setRole(r)}
+                    />
+                    <span>{r}</span>
+                  </label>
+                ))}
+
+                {role === "Other" && (
+                  <input
+                    type="text"
+                    value={customRole}
+                    onChange={(e) => setCustomRole(e.target.value)}
+                    placeholder="Enter your field (e.g. Product Manager, Finance, Design, Marketing...)"
+                    className="w-full rounded-lg px-4 py-2 outline-none mt-2"
+                    style={{ backgroundColor: "#F3F7FF", color: "#0A2540" }}
+                  />
+                )}
+
+                <label className="block text-xs mb-1 opacity-80 mt-3">
                   Interests (comma separated)
                 </label>
                 <input
@@ -197,7 +269,7 @@ export default function OnboardingPage() {
                 {step < 3
                   ? "Continue →"
                   : loading
-                  ? "Generating..."
+                  ? "Generating your roadmap..."
                   : "Generate My Roadmap ✨"}
               </button>
             </div>

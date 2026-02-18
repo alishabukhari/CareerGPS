@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { getToken } from "@/lib/auth";
+import { clearToken, getToken } from "@/lib/auth";
 import { theme } from "@/styles/theme";
 import { useRequireProfile } from "@/lib/useRequiredProfile";
+
 
 const currentTheme = theme.experimental;
 
@@ -45,41 +46,59 @@ export default function RoadmapPage() {
     if (typeof raw === "string") return JSON.parse(raw);
     return raw;
   };
+const loadRoadmap = async () => {
+  setLoading(true);
+  setErrorMsg(null);
 
-  const loadRoadmap = async () => {
-    setLoading(true);
-    setErrorMsg(null);
+  const token = getToken();
+  if (!token) {
+    router.push("/login");
+    return;
+  }
 
-    const token = getToken();
-    if (!token) {
+  try {
+    const [roadmapRes, completedRes, statsRes, todayRes] = await Promise.all([
+      fetch(`${API_BASE}/roadmap`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${API_BASE}/roadmap/completed`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${API_BASE}/roadmap/stats`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`${API_BASE}/roadmap/today`, { headers: { Authorization: `Bearer ${token}` } }),
+    ]);
+
+    // 🔒 If token expired / unauthorized → force re-login
+    if (
+      roadmapRes.status === 401 ||
+      completedRes.status === 401 ||
+      statsRes.status === 401 ||
+      todayRes.status === 401 ||
+      roadmapRes.status === 403 ||
+      completedRes.status === 403 ||
+      statsRes.status === 403 ||
+      todayRes.status === 403
+    ) {
+      clearToken();
       router.push("/login");
       return;
     }
 
-    try {
-      const [roadmapRes, completedRes, statsRes, todayRes] = await Promise.all([
-        fetch(`${API_BASE}/roadmap`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_BASE}/roadmap/completed`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_BASE}/roadmap/stats`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_BASE}/roadmap/today`, { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
+    const roadmapData = await roadmapRes.json();
+    let completedData = { completed: [] };
+      if (completedRes.ok) {
+        completedData = await completedRes.json();
+      }
+    const statsData = await statsRes.json();
+    const todayData = await todayRes.json();
 
-      const roadmapData = await roadmapRes.json();
-      const completedData = await completedRes.json();
-      const statsData = await statsRes.json();
-      const todayData = await todayRes.json();
-
-      setRoadmap(parseRoadmap(roadmapData));
-      setCompleted(completedData.completed || []);
-      setStats(statsData);
-      setToday(todayData);
-    } catch (err) {
-      console.error("Roadmap error:", err);
-      setErrorMsg("Failed to load roadmap");
-    } finally {
-      setLoading(false);
-    }
-  };
+    setRoadmap(parseRoadmap(roadmapData));
+    setCompleted(completedData.completed || []);
+    setStats(statsData);
+    setToday(todayData);
+  } catch (err) {
+    console.error("Roadmap error:", err);
+    setErrorMsg("Failed to load roadmap");
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => setMounted(true), []);
   useEffect(() => {
@@ -87,21 +106,40 @@ export default function RoadmapPage() {
     loadRoadmap();
   }, [mounted]);
 
-  const toggleComplete = async (title: string) => {
-    const token = getToken();
-    if (!token) return;
+const toggleComplete = async (title: string) => {
+  const token = getToken();
+  if (!token) {
+    router.push("/login");
+    return;
+  }
 
-    await fetch(`${API_BASE}/roadmap/complete`, {
+  try {
+    const res = await fetch(`${API_BASE}/roadmap/complete`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title: title.trim() }),  // 👈 sanitize
     });
 
-    loadRoadmap();
-  };
+    if (!res.ok) {
+      const err = await res.json();
+      console.error("Complete error:", err);
+      return;
+    }
+
+    setCompleted((prev) =>
+      prev.includes(title)
+        ? prev.filter((t) => t !== title)
+        : [...prev, title]
+    );
+
+    await loadRoadmap(); // 🔁 refresh UI after marking
+  } catch (err) {
+    console.error("Toggle complete failed:", err);
+  }
+};
 
   const allItems = useMemo(() => {
     if (!roadmap) return [];
@@ -173,7 +211,11 @@ export default function RoadmapPage() {
               return (
                 <motion.div
                   key={key}
-                  className="rounded-2xl p-6 flex justify-between items-center bg-[#000926] border border-[#0F52BA]"
+                  className={`rounded-2xl p-6 flex justify-between items-center transition
+                    ${isDone 
+                      ? "bg-[#081433] border-[#4F83FF] shadow-[0_0_0_1px_#4F83FF]" 
+                      : "bg-[#000926] border border-[#0F52BA] hover:border-[#4F83FF]"}
+                  `}
                 >
                   <div>
                     <h3
@@ -187,11 +229,12 @@ export default function RoadmapPage() {
 
                   <button
                     onClick={() => toggleComplete(item.title)}
-                    className="h-9 w-9 rounded-full border flex items-center justify-center text-[#D6E6F3]"
-                    style={{
-                      backgroundColor: isDone ? "#0F52BA" : "transparent",
-                      borderColor: isDone ? "#0F52BA" : "#A6C5D7",
-                    }}
+                    title={isDone ? "Completed" : "Mark as completed"}
+                    className={`h-9 w-9 rounded-full flex items-center justify-center transition-all duration-200
+                      ${isDone 
+                        ? "bg-[#4F83FF] text-white shadow-md scale-105" 
+                        : "border border-[#A6C5D7] text-[#D6E6F3] hover:bg-[#0F52BA]/30 hover:scale-105"}
+                    `}
                   >
                     ✓
                   </button>

@@ -29,6 +29,35 @@ type ChatSession = {
   is_pinned?: boolean;
 };
 
+const groupSessionsByDate = (sessions: ChatSession[]) => {
+  const groups: Record<string, ChatSession[]> = {};
+
+  const today = new Date().toDateString();
+  const yesterday = new Date(Date.now() - 86400000).toDateString();
+
+  // ✅ Sort pinned chats to top, then by date
+  const sortedSessions = [...sessions].sort((a, b) => {
+    const pinDiff = Number(b.is_pinned) - Number(a.is_pinned);
+    if (pinDiff !== 0) return pinDiff;
+
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
+  // ✅ Group AFTER sorting
+  sortedSessions.forEach((s) => {
+    const dateStr = new Date(s.created_at).toDateString();
+
+    let label = "Older";
+    if (dateStr === today) label = "Today";
+    else if (dateStr === yesterday) label = "Yesterday";
+
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(s);
+  });
+
+  return groups;
+};
+
 export default function TopicDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -56,6 +85,8 @@ export default function TopicDetailPage() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const groupedSessions = groupSessionsByDate(chatSessions);
+  const pinnedCount = chatSessions.filter(s => s.is_pinned).length;
 
   const hasFetched = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -301,59 +332,45 @@ const streamTopicAI = async (userText: string) => {
   if (!token || !topic?.title) return;
 
   try {
-    setLoadingSessions(true);
-
     const res = await fetch(
       `${API_URL}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
+      { headers: { Authorization: `Bearer ${token}` } }
     );
 
-    if (!res.ok) throw new Error("Failed to load sessions");
-
     const data = await res.json();
+
+    console.log(
+      "🔁 sessions after pin:",
+      data.sessions.map((s: any) => ({
+        id: s.id,
+        preview_title: s.preview_title,
+        is_pinned: s.is_pinned,
+        keys: Object.keys(s),
+      }))
+    );
+
     setChatSessions(data.sessions || []);
-  } catch (e) {
-    console.error("Failed to load sessions");
+  } catch {
     setChatSessions([]);
-  } finally {
-    setLoadingSessions(false);
   }
 };
 
-const groupSessionsByDate = (sessions: any[]) => {
-  const groups: Record<string, any[]> = {};
-
-  const today = new Date().toDateString();
-  const yesterday = new Date(Date.now() - 86400000).toDateString();
-
-  const sorted = [...sessions].sort((a, b) => {
-    if (a.is_pinned && !b.is_pinned) return -1;
-    if (!a.is_pinned && b.is_pinned) return 1;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-  });
-
-  sorted.forEach((s) => {
-    const dateStr = new Date(s.created_at).toDateString();
-
-    let label = "Older";
-    if (dateStr === today) label = "Today";
-    else if (dateStr === yesterday) label = "Yesterday";
-
-    if (!groups[label]) groups[label] = [];
-    groups[label].push(s);
-  });
-
-  return groups;
-};
 
 return (
   <div className="w-full relative">
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* LEFT DARK NAVY PANEL */}
+      {/*<div className="hidden lg:block lg:col-span-1 bg-[#020617] rounded-2xl" />*/}
 
       {/* MAIN */}
-      <div className="lg:col-span-8 space-y-8">
+      <motion.div
+          animate={{
+            marginRight: showAI ? "520px" : "0px",
+            maxWidth: showAI ? "calc(100% - 520px)" : "100%",
+          }}
+          transition={{ duration: 0.35, ease: "easeInOut" }}
+          className="mx-auto w-full max-w-[2000px] space-y-8 lg:col-span-11 px-6"
+        >
 
         <div>
           <button onClick={() => router.push("/roadmap")} className="text-blue-600 hover:underline cursor-pointer">
@@ -504,7 +521,7 @@ return (
             Ask AI for Help
           </button>
         </div>
-      </div>
+      </motion.div>
 
       {/* AI CHATBOT */}
       <AnimatePresence>
@@ -513,7 +530,7 @@ return (
             initial={{ x: 80, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 80, opacity: 0 }}
-            className="fixed right-0 top-0 h-screen w-[460px] bg-[#EEF5FF] border-l border-blue-300 shadow-xl z-40 flex flex-col"
+            className="fixed right-0 top-0 h-screen w-[520px] bg-[#EEF5FF] border-l border-blue-300 shadow-xl z-40 flex flex-col"
           >
             <div className="bg-blue-600 p-4">
               <div className="flex items-center justify-between">
@@ -594,110 +611,141 @@ return (
                     🗑️ Delete all chats for this topic
                   </button>
 
-                  {Object.entries(groupSessionsByDate(chatSessions)).map(([label, sessions]) => (
-                   <div key={label}>
-                    <p className="font-semibold text-slate-500 uppercase tracking-wide mb-1">
-                      {label}
-                    </p>
+                  {Object.entries(groupedSessions).map(([label, sessions]) => (
+                    <div key={label}>
+                      <p className="font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                        {label}
+                      </p>
 
-                    <div className="space-y-1">
-                      {(sessions as ChatSession[]).map((s) => (
-                        <div
-                          key={s.id}
-                          className={`group flex items-center justify-between w-full px-3 py-2 rounded-lg hover:bg-blue-100 transition ${
-                            activeSessionId === s.id ? "bg-blue-100" : ""
-                          } ${s.is_pinned ? "border border-yellow-300/50 bg-yellow-50/40" : ""}`}
-                        >
-                          {/* LEFT: click to open chat */}
-                          <button
-                            onClick={async () => {
-                              setActiveSessionId(s.id);
-
-                              const token = getToken();
-                              const res = await fetch(
-                                `${API_URL}/roadmap/topic/chat?title=${encodeURIComponent(
-                                  topic.title
-                                )}&session_id=${s.id}`,
-                                { headers: { Authorization: `Bearer ${token}` } }
-                              );
-
-                              const data = await res.json();
-                              setMessages(data.messages || []);
-                            }}
-                            className="flex-1 text-left"
+                      <div className="space-y-1">
+                        {(sessions as ChatSession[]).map((s) => (
+                          <div
+                            key={s.id}
+                            className={`group flex items-center justify-between w-full px-3 py-2 rounded-lg transition
+                              ${activeSessionId === s.id ? "bg-blue-100" : "hover:bg-blue-100"}
+                              ${s.is_pinned ? "border border-yellow-300/50 bg-yellow-50/40" : ""}`}
                           >
-                            <p className="font-medium text-slate-700 truncate flex items-center gap-2">
-                              {s.is_pinned && <img src="/pin.png" className="w-4 h-4" />}
-                              {s.preview_title || "Chat Session"}
-                            </p>
-
-                            <p className="text-[10px] text-slate-400">
-                              {new Date(s.created_at).toLocaleTimeString()}
-                            </p>
-                          </button>
-
-                          {/* RIGHT: 3 dots menu */}
-                          <div className="relative">
+                            {/* LEFT: click to open chat */}
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOpenMenuId(openMenuId === s.id ? null : s.id);
+                              onClick={async () => {
+                                setActiveSessionId(s.id);
+
+                                const token = getToken();
+                                if (!token) return;
+
+                                const res = await fetch(
+                                  `${API_URL}/roadmap/topic/chat?title=${encodeURIComponent(
+                                    topic.title
+                                  )}&session_id=${s.id}`,
+                                  { headers: { Authorization: `Bearer ${token}` } }
+                                );
+
+                                const data = await res.json();
+                                setMessages(data.messages || []);
                               }}
-                              className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-slate-800 transition px-2"
+                              className="flex-1 text-left"
                             >
-                              ⋯
+                              <p className="font-medium text-slate-700 truncate flex items-center gap-2">
+                                {s.preview_title || "Chat Session"}
+
+                                {/* 📌 show pin icon ONLY if pinned */}
+                                {s.is_pinned && (
+                                  <img
+                                    src="/pin.png"
+                                    className="w-3.5 h-3.5 opacity-80"
+                                    title="Pinned chat"
+                                  />
+                                )}
+                              </p>
+
+                              <p className="text-[10px] text-slate-400">
+                                {new Date(s.created_at).toLocaleTimeString()}
+                              </p>
                             </button>
 
-                            {openMenuId === s.id && (
-                              <div
-                                onClick={(e) => e.stopPropagation()}
-                                className="absolute right-0 top-7 z-50 w-40 bg-white rounded-lg shadow-lg border text-xs overflow-hidden"
+                            {/* RIGHT: 3 dots menu */}
+                            <div className="flex items-center gap-1 relative">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenMenuId(openMenuId === s.id ? null : s.id);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-slate-800 transition px-2"
                               >
-                                <button
-                                  onClick={async () => {
-                                    const token = getToken();
-                                    await fetch(
-                                      `${API_URL}/roadmap/topic/chat/session/pin/${s.id}`,
-                                      { method: "POST", headers: { Authorization: `Bearer ${token}` } }
-                                    );
+                                ⋯
+                              </button>
 
-                                    setOpenMenuId(null);
-                                    loadChatSessions();
-                                  }}
-                                  className="flex items-center gap-2 w-full px-3 py-2 hover:bg-blue-50 text-left"
+                              {openMenuId === s.id && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 top-7 z-50 w-40 bg-white rounded-lg shadow-lg border text-xs overflow-hidden"
                                 >
-                                  <img src="/pin.png" className="w-4 h-4" />
-                                  {s.is_pinned ? "Unpin chat" : "Pin chat"}
-                                </button>
+                                  <button
+                                    onClick={async () => {
+                                      const token = getToken();
+                                      if (!token) return;
 
-                                <button
-                                  onClick={async () => {
-                                    const token = getToken();
-                                    await fetch(`${API_URL}/roadmap/topic/chat/session/${s.id}`, {
-                                      method: "DELETE",
-                                      headers: { Authorization: `Bearer ${token}` },
-                                    });
+                                      try {
+                                        const res = await fetch(
+                                          `${API_URL}/roadmap/topic/chat/session/pin/${s.id}`,
+                                          { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+                                        );
 
-                                    setOpenMenuId(null);
-                                    loadChatSessions();
+                                        if (!res.ok) {
+                                          const data = await res.json();
+                                          alert(data?.detail || "You can only pin up to 3 chats.");
+                                          return;
+                                        }
 
-                                    if (activeSessionId === s.id) {
-                                      setActiveSessionId(null);
-                                      setMessages([]);
-                                    }
-                                  }}
-                                  className="flex items-center gap-2 w-full px-3 py-2 hover:bg-red-50 text-red-600 text-left"
-                                >
-                                  <img src="/bin.png" className="w-4 h-4" />
-                                  Delete chat
-                                </button>
-                              </div>
-                            )}
+                                        setOpenMenuId(null);
+                                        await loadChatSessions();
+                                      } catch {
+                                        alert("Pin failed. Try again.");
+                                      }
+                                    }}
+                                    disabled={!s.is_pinned && pinnedCount >= 3}
+                                    className={`flex items-center gap-2 w-full px-3 py-2 text-left
+                                      ${!s.is_pinned && pinnedCount >= 3
+                                        ? "opacity-40 cursor-not-allowed"
+                                        : "hover:bg-blue-50"
+                                      }
+                                    `}
+                                  >
+                                    <img src={s.is_pinned ? "/unpin.png" : "/pin.png"} className="w-4 h-4" />
+                                    {s.is_pinned ? "Unpin chat" : "Pin chat"}
+                                  </button>
+
+                                  {/* Delete */}
+                                  <button
+                                    onClick={async () => {
+                                      const token = getToken();
+                                      if (!token) return;
+
+                                      await fetch(`${API_URL}/roadmap/topic/chat/session/${s.id}`, {
+                                        method: "DELETE",
+                                        headers: { Authorization: `Bearer ${token}` },
+                                      });
+
+                                      setOpenMenuId(null);
+                                      await loadChatSessions();
+
+                                      if (activeSessionId === s.id) {
+                                        setActiveSessionId(null);
+                                        setMessages([]);
+                                      }
+                                    }}
+                                    className="flex items-center gap-2 w-full px-3 py-2 hover:bg-red-50 text-red-600 text-left"
+                                  >
+                                    <img src="/bin.png" className="w-4 h-4" />
+                                    Delete chat
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
                   ))}
                 </motion.div>
               )}
@@ -718,7 +766,7 @@ return (
                     </span>
                   )}
 
-                  <div className="flex flex-col max-w-[75%]">
+                  <div className="flex flex-col max-w-[85%]">
                     <div
                       className={`px-4 py-3 rounded-2xl inline-block w-fit break-words whitespace-pre-line leading-relaxed ${
                         m.role === "assistant"

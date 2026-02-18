@@ -1,14 +1,35 @@
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
+import { getToken, clearToken } from "@/lib/auth";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
+  useEffect(() => {
+    const token = getToken();
+
+    // 🔐 Protect app routes
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    // 🚫 Prevent logged-in users from seeing login/signup
+    if (pathname === "/login" || pathname === "/signup") {
+      router.replace("/home");
+    }
+  }, [pathname, router]);
+
   const isHome = pathname === "/home";
   const isRoadmap = pathname.startsWith("/roadmap");
+
+  const handleLogout = () => {
+    clearToken(); // ✅ clears "access_token"
+    router.replace("/login");
+  };
 
   return (
     <div className="min-h-screen flex bg-[#EAF4FB]">
@@ -40,7 +61,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </div>
 
         <button
-          onClick={() => router.push("/login")}
+          onClick={handleLogout}
           className="text-sm text-slate-400 hover:text-white"
         >
           ⎋ Sign Out

@@ -9,6 +9,8 @@ import asyncio
 import json
 import os
 from openai import OpenAI
+from postgrest.exceptions import APIError
+
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -18,9 +20,6 @@ class CompleteTaskRequest(BaseModel):
     title: str
 
 router = APIRouter(prefix="/roadmap", tags=["roadmap"])
-supabase = get_supabase_admin()
-
-TARGET_ROLE = "Junior Frontend Developer"
 
 class ChatMsg(BaseModel):
     role: Literal["user", "assistant", "system"]
@@ -40,33 +39,64 @@ class CreateChatSessionRequest(BaseModel):
 class RenameChatSessionRequest(BaseModel):
     title: str      
 
+class InitRoadmapRequest(BaseModel):
+    target_role: str
+
 # ======================
 # Helpers
 # ======================
 
-def _get_saved_roadmap(user_id: str):
-    return (
-        supabase.table("user_roadmap")
-        .select("roadmap_json")
-        .eq("user_id", user_id)
-        .eq("target_role", TARGET_ROLE)
-        .limit(1)
-        .execute()
+def generate_ai_roadmap_for_role(role: str) -> dict:
+    prompt = f"""
+Create a structured learning roadmap for a {role}.
+Return ONLY valid JSON in this format:
+
+{{
+  "target_role": "{role}",
+  "phases": [
+    {{
+      "phase": "Phase 1: ...",
+      "description": "...",
+      "items": [
+        {{
+          "title": "...",
+          "type": "course|project|reading",
+          "estimated_weeks": 2,
+          "why": "..."
+        }}
+      ]
+    }}
+  ]
+}}
+"""
+
+    res = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.4,
     )
 
-def _save_roadmap(user_id: str, roadmap_dict: dict):
-    payload = {
-        "user_id": user_id,
-        "target_role": TARGET_ROLE,
-        "roadmap_json": roadmap_dict,
-        "updated_at": datetime.utcnow().isoformat(),
-    }
+    content = res.choices[0].message.content.strip()
+    start = content.find("{")
+    end = content.rfind("}") + 1
+    return json.loads(content[start:end])
 
-    return (
-        supabase.table("user_roadmap")
-        .upsert(payload, on_conflict="user_id,target_role")
-        .execute()
-    )
+from postgrest.exceptions import APIError
+
+def _get_saved_roadmap(user_id: str, supabase):
+    try:
+        return (
+            supabase.table("user_roadmap")
+            .select("roadmap_json, target_role")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except APIError as e:
+        if "JWT expired" in str(e):
+            raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise
 
 def generate_ai_explanation(title: str):
     try:
@@ -88,7 +118,6 @@ Return ONLY valid JSON in this exact format (no extra text, no markdown):
 
         content = res.choices[0].message.content.strip()
 
-        # 🔥 Extract JSON safely if model adds text
         start = content.find("{")
         end = content.rfind("}") + 1
         json_str = content[start:end]
@@ -108,48 +137,6 @@ Return ONLY valid JSON in this exact format (no extra text, no markdown):
             ],
         )
     
-def _generate_roadmap():
-    return {
-        "target_role": TARGET_ROLE,
-        "phases": [
-            {
-                "phase": "Phase 1: Foundations",
-                "description": "Build strong fundamentals in web development.",
-                "items": [
-                    {
-                        "title": "HTML & CSS Basics",
-                        "type": "course",
-                        "estimated_weeks": 2,
-                        "why": "You need solid layout and styling skills."
-                    },
-                    {
-                        "title": "JavaScript Fundamentals",
-                        "type": "course",
-                        "estimated_weeks": 3,
-                        "why": "JS is core to frontend logic."
-                    }
-                ]
-            },
-            {
-                "phase": "Phase 2: React",
-                "description": "Learn modern frontend development with React.",
-                "items": [
-                    {
-                        "title": "React Basics",
-                        "type": "course",
-                        "estimated_weeks": 3,
-                        "why": "React is industry standard."
-                    },
-                    {
-                        "title": "Build a small React app",
-                        "type": "project",
-                        "estimated_weeks": 2,
-                        "why": "Projects prove your skills."
-                    }
-                ]
-            }
-        ]
-    }
 
 # ======================
 # Routes
@@ -157,41 +144,48 @@ def _generate_roadmap():
 
 @router.get("")
 def get_roadmap(current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     user_id = current_user["id"]
 
-    saved = _get_saved_roadmap(user_id)
+    saved = _get_saved_roadmap(user_id, supabase)
 
-    if saved.data:
-        roadmap_data = saved.data[0]["roadmap_json"]
-        if isinstance(roadmap_data, str):
-            roadmap_data = json.loads(roadmap_data)
-    else:
-        roadmap_data = _generate_roadmap()
-        _save_roadmap(user_id, roadmap_data)
+    if not saved.data:
+        raise HTTPException(status_code=404, detail="No roadmap found for this user")
+
+    roadmap_data = saved.data[0]["roadmap_json"]
+    if isinstance(roadmap_data, str):
+        roadmap_data = json.loads(roadmap_data)
 
     return roadmap_data
 
 
-@router.get("/completed")
-def get_completed(current_user=Depends(get_current_user)):
-    user_id = current_user["id"]
+@router.get("/roadmap/completed")
+def get_completed(user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
+    user_id = user["id"]
 
-    rows = (
-        supabase.table("roadmap_progress")
-        .select("task_title")
-        .eq("user_id", user_id)
-        .execute()
-    )
+    try:
+        res = (
+            supabase
+            .table("roadmap_progress")   # ✅ FIXED TABLE NAME
+            .select("title")
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except APIError as e:
+        if "JWT expired" in str(e):
+            raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    return {"completed": [r["task_title"] for r in rows.data]}
-
+    return {"completed": [r["title"] for r in (res.data or [])]}
 
 @router.get("/stats")
 def get_stats(current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     user_id = current_user["id"]
 
     try:
-        saved = _get_saved_roadmap(user_id)
+        saved = _get_saved_roadmap(user_id, supabase)
         if not saved.data:
             return {"total": 0, "completed": 0, "percent": 0}
 
@@ -223,10 +217,11 @@ def get_stats(current_user=Depends(get_current_user)):
 
 @router.get("/today")
 def get_today_focus(current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     user_id = current_user["id"]
 
     try:
-        saved = _get_saved_roadmap(user_id)
+        saved = _get_saved_roadmap(user_id, supabase)
         if not saved.data:
             return {"task": None}
 
@@ -263,10 +258,11 @@ def get_today_focus(current_user=Depends(get_current_user)):
 
 @router.get("/topic")
 def get_topic_detail(title: str, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     user_id = current_user["id"]
     clean_title = title.strip().lower()
 
-    saved = _get_saved_roadmap(user_id)
+    saved = _get_saved_roadmap(user_id, supabase)
     if not saved.data:
         raise HTTPException(status_code=404, detail="Roadmap not found")
 
@@ -278,7 +274,6 @@ def get_topic_detail(title: str, current_user=Depends(get_current_user)):
         for item in phase["items"]:
             if item["title"].strip().lower() == clean_title:
 
-                # ✅ Check cache
                 cached = (
                     supabase.table("topic_ai_cache")
                     .select("*")
@@ -298,10 +293,8 @@ def get_topic_detail(title: str, current_user=Depends(get_current_user)):
                         "checklist": row["checklist"],
                     }
 
-                # 🤖 Generate AI
                 explanation, checklist = generate_ai_explanation(item["title"])
 
-                # 💾 Cache result
                 supabase.table("topic_ai_cache").insert({
                     "title": item["title"],
                     "explanation": explanation,
@@ -322,9 +315,10 @@ def get_topic_detail(title: str, current_user=Depends(get_current_user)):
 
 @router.get("/topic/next")
 def get_next_topic(title: str, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     user_id = current_user["id"]
 
-    saved = _get_saved_roadmap(user_id)
+    saved = _get_saved_roadmap(user_id, supabase)
     if not saved.data:
         raise HTTPException(status_code=404, detail="Roadmap not found")
 
@@ -347,12 +341,11 @@ def get_next_topic(title: str, current_user=Depends(get_current_user)):
 
     return {"next": flat[idx + 1]}
 
+
 @router.get("/topic/chat")
-def get_topic_chat(
-    title: str,
-    session_id: Optional[str] = None,
-    current_user=Depends(get_current_user)
-):
+def get_topic_chat(title: str, session_id: Optional[str] = None, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
+
     q = (
         supabase.table("topic_chat_messages")
         .select("role, content")
@@ -365,27 +358,29 @@ def get_topic_chat(
         q = q.eq("session_id", session_id)
 
     rows = q.execute()
-
     return {"messages": rows.data or []}
 
+
 @router.get("/topic/chat/sessions")
-def list_chat_sessions(
-    topic_title: str,
-    current_user=Depends(get_current_user)
-):
+def list_chat_sessions(topic_title: str, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
+
     rows = (
         supabase.table("chat_sessions")
         .select("*")
         .eq("user_id", current_user["id"])
         .eq("topic_title", topic_title)
+        .order("is_pinned", desc=True)
         .order("created_at", desc=True)
         .execute()
     )
 
     return {"sessions": rows.data or []}
 
+
 @router.post("/complete")
 def complete_task(body: CompleteTaskRequest, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     title = body.title
     user_id = current_user["id"]
 
@@ -418,15 +413,15 @@ def complete_task(body: CompleteTaskRequest, current_user=Depends(get_current_us
 
     return {"completed": [r["task_title"] for r in rows.data]}
 
+
 @router.post("/topic/ai")
-async def topic_ai_chat(
-    payload: TopicChatRequest,
-    current_user=Depends(get_current_user)
-):
+async def topic_ai_chat(payload: TopicChatRequest, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
+
     if not payload.messages:
         raise HTTPException(status_code=400, detail="messages required")
 
-    topic = payload.topic_title or payload.topic_slug or "this topic"  # ✅ OK
+    topic = payload.topic_title or payload.topic_slug or "this topic"
 
     system_prompt = (
         f"You are a friendly learning assistant for the topic: {topic}. "
@@ -434,7 +429,7 @@ async def topic_ai_chat(
         "Use bullet points when helpful."
     )
 
-    if payload.mode == "eli5":  # ✅ OK (your ELI5 mode stays)
+    if payload.mode == "eli5":
         system_prompt += " Explain everything like I am 5 years old. Use very simple words and short sentences."
 
     async def sse_stream() -> AsyncGenerator[bytes, None]:
@@ -445,7 +440,7 @@ async def topic_ai_chat(
             {"role": m.role, "content": m.content} for m in payload.messages
         ]
 
-        full_response_text = ""  # 🔧 CHANGE: collect full AI response
+        full_response_text = ""
 
         stream = client.chat.completions.create(
             model="gpt-4.1-mini",
@@ -458,13 +453,12 @@ async def topic_ai_chat(
             try:
                 delta = getattr(chunk.choices[0].delta, "content", None)
                 if delta:
-                    full_response_text += delta  # 🔧 CHANGE: append streamed text
+                    full_response_text += delta
                     yield f"data: {delta}\n\n".encode("utf-8")
                     await asyncio.sleep(0)
             except Exception as e:
                 print("Streaming chunk error:", e)
 
-        # 🔧 CHANGE: persist BOTH user + assistant messages
         supabase.table("topic_chat_messages").insert([
             {
                 "user_id": current_user["id"],
@@ -482,7 +476,6 @@ async def topic_ai_chat(
             }
         ]).execute()
 
-        # 🧠 Auto-title if session still has default title
         if payload.session_id:
             session = (
                 supabase.table("chat_sessions")
@@ -501,11 +494,7 @@ async def topic_ai_chat(
                     temperature=0.3,
                 )
 
-                auto_title = (
-                    title_res.choices[0].message.content
-                    .strip()
-                    .replace('"', "")
-                )
+                auto_title = title_res.choices[0].message.content.strip().replace('"', "")
 
                 supabase.table("chat_sessions") \
                     .update({"preview_title": auto_title}) \
@@ -523,11 +512,11 @@ async def topic_ai_chat(
         },
     )
 
+
 @router.post("/topic/react")
-def react_to_message(
-    payload: dict,
-    current_user=Depends(get_current_user)
-):
+def react_to_message(payload: dict, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
+
     topic_title = payload.get("topic_title")
     message = payload.get("message")
     reaction = payload.get("reaction")
@@ -535,20 +524,19 @@ def react_to_message(
     if not topic_title or not message or reaction not in ["like", "dislike"]:
         raise HTTPException(status_code=400, detail="Invalid reaction payload")
 
-    # Upsert reaction (like/dislike toggle)
     supabase.table("topic_chat_reactions").insert({
-    "user_id": current_user["id"],
-    "topic_title": payload.topic_title,
-    "message": payload.message,
-    "reaction": payload.reaction,
-}).execute()
+        "user_id": current_user["id"],
+        "topic_title": topic_title,
+        "message": message,
+        "reaction": reaction,
+    }).execute()
+
     return {"status": "ok", "reaction": reaction}
 
+
 @router.post("/topic/chat/session")
-def create_chat_session(
-    payload: CreateChatSessionRequest,
-    current_user=Depends(get_current_user)
-):
+def create_chat_session(payload: CreateChatSessionRequest, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     user_id = current_user["id"]
 
     row = (
@@ -563,39 +551,94 @@ def create_chat_session(
 
     return {"session": row.data[0]}
 
+
 @router.post("/topic/chat/session/pin/{session_id}")
 def toggle_pin_chat_session(session_id: str, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     user_id = current_user["id"]
 
-    row = supabase.table("chat_sessions") \
-        .select("pinned") \
-        .eq("id", session_id) \
-        .eq("user_id", user_id) \
-        .single() \
+    session_res = (
+        supabase.table("chat_sessions")
+        .select("id, is_pinned")
+        .eq("id", session_id)
+        .eq("user_id", user_id)
+        .single()
         .execute()
+    )
 
-    new_val = not (row.data.get("pinned") if row.data else False)
+    if not session_res.data:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    is_currently_pinned = session_res.data.get("is_pinned", False)
+
+    pinned_res = (
+        supabase.table("chat_sessions")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("is_pinned", True)
+        .execute()
+    )
+
+    pinned_count = len(pinned_res.data or [])
+
+    if not is_currently_pinned and pinned_count >= 3:
+        raise HTTPException(status_code=400, detail="You can only pin up to 3 chats.")
+
+    new_val = not is_currently_pinned
 
     supabase.table("chat_sessions") \
-        .update({ "pinned": new_val }) \
+        .update({ "is_pinned": new_val }) \
         .eq("id", session_id) \
         .eq("user_id", user_id) \
         .execute()
 
-    return { "pinned": new_val }
+    return { "is_pinned": new_val }
+
+@router.post("/init")
+def init_roadmap(payload: InitRoadmapRequest, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
+    user_id = current_user["id"]
+    role = payload.target_role
+
+    # Check if user already has roadmap
+    existing = (
+        supabase.table("user_roadmap")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("target_role", role)
+        .limit(1)
+        .execute()
+    )
+
+    if existing.data:
+        return {"status": "exists"}
+
+    roadmap = generate_ai_roadmap_for_role(role)
+
+    supabase.table("user_roadmap").upsert(
+        {
+            "user_id": user_id,
+            "target_role": role,
+            "roadmap_json": roadmap,
+            "updated_at": datetime.utcnow().isoformat(),
+        },
+        on_conflict="user_id,target_role"
+    ).execute()
+
+    return {"status": "created", "target_role": role}
+
 
 @router.delete("/topic/chat/session/{session_id}")
 def delete_chat_session(session_id: str, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     user_id = current_user["id"]
 
-    # 1️⃣ Delete all messages under this session
     supabase.table("topic_chat_messages") \
         .delete() \
         .eq("session_id", session_id) \
         .eq("user_id", user_id) \
         .execute()
 
-    # 2️⃣ Delete the session itself
     supabase.table("chat_sessions") \
         .delete() \
         .eq("id", session_id) \
@@ -604,18 +647,18 @@ def delete_chat_session(session_id: str, current_user=Depends(get_current_user))
 
     return {"status": "deleted", "session_id": session_id}
 
+
 @router.delete("/topic/chat/sessions")
 def delete_all_chat_sessions(topic_title: str, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
     user_id = current_user["id"]
 
-    # 1️⃣ Delete all messages for this topic
     supabase.table("topic_chat_messages") \
         .delete() \
         .eq("user_id", user_id) \
         .eq("topic_title", topic_title) \
         .execute()
 
-    # 2️⃣ Delete all sessions for this topic
     supabase.table("chat_sessions") \
         .delete() \
         .eq("user_id", user_id) \
@@ -624,8 +667,11 @@ def delete_all_chat_sessions(topic_title: str, current_user=Depends(get_current_
 
     return {"status": "deleted_all"}
 
+
 @router.put("/topic/chat/session/{session_id}")
 def rename_chat_session(session_id: str, payload: RenameChatSessionRequest, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
+
     supabase.table("chat_sessions") \
         .update({ "preview_title": payload.title }) \
         .eq("id", session_id) \
