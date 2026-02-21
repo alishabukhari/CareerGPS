@@ -24,6 +24,18 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        {/* FullCalendar base styles (REQUIRED for your CSS overrides to work) */}
+        <link
+          rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.11/index.global.min.css"
+        />
+        <link
+          rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/@fullcalendar/daygrid@6.1.11/index.global.min.css"
+        />
+      </head>
+
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

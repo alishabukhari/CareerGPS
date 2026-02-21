@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { getToken } from "@/lib/auth";
+import { markTaskComplete } from "@/lib/roadmapApi";
+import confetti from "canvas-confetti";
 
 const API_BASE = "http://127.0.0.1:8000";
-const API_URL = process.env.NEXT_PUBLIC_API_URL!;
 
 type TopicData = {
   title: string;
@@ -61,9 +62,13 @@ const groupSessionsByDate = (sessions: ChatSession[]) => {
 export default function TopicDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const rawSlug = decodeURIComponent(params.slug as string);
+  const title = rawSlug.replace(/-/g, " ");
   const slug = decodeURIComponent(params.slug as string);
+ 
 
   const [topic, setTopic] = useState<TopicData | null>(null);
+  
   const [loading, setLoading] = useState(true);
   const [marking, setMarking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,11 +92,22 @@ export default function TopicDetailPage() {
   const [showHistory, setShowHistory] = useState(false);
   const groupedSessions = groupSessionsByDate(chatSessions);
   const pinnedCount = chatSessions.filter(s => s.is_pinned).length;
-
+  const [roadmapItems, setRoadmapItems] = useState<{ title: string }[]>([]);
+  const [nextTopic, setNextTopic] = useState<{ title: string } | null>(null);
   const hasFetched = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
+  const phase = topic?.phase?.toLowerCase() || "";
+
+const phaseLabel = phase.includes("core")
+  ? "Core Skills"
+  : phase.includes("advanced")
+  ? "Advanced"
+  : "Foundation";
+
+ 
   useEffect(() => {
+    
     if (hasFetched.current) return;
     hasFetched.current = true;
 
@@ -104,7 +120,7 @@ export default function TopicDetailPage() {
     const loadTopic = async () => {
       try {
         const res = await fetch(
-          `${API_BASE}/roadmap/topic?title=${encodeURIComponent(slug)}`,
+          `${API_BASE}/roadmap/topic?title=${encodeURIComponent(title)}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         const data = await res.json();
@@ -116,11 +132,37 @@ export default function TopicDetailPage() {
       }
     };
 
+    const loadRoadmapItems = async () => {
+      const token = getToken();
+      if (!token) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/roadmap`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) return;
+
+        const data = await res.json();
+
+        const parsed = typeof data === "string" ? JSON.parse(data) : data;
+
+        const allItems = parsed.phases.flatMap((p: any) => p.items);
+
+        setRoadmapItems(allItems);
+
+      } catch (err) {
+        console.error("Failed to load roadmap items", err);
+      }
+    };
+
+    loadRoadmapItems();
+
     const loadChatHistory = async () => {
       try {
         const token = getToken();
         const res = await fetch(
-          `${API_URL}/roadmap/topic/chat?title=${encodeURIComponent(slug)}`,
+          `${API_BASE}/roadmap/topic/chat?title=${encodeURIComponent(title)}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         if (res.ok) {
@@ -135,6 +177,20 @@ export default function TopicDetailPage() {
     loadTopic();
     loadChatHistory();
   }, [slug, router]);
+
+  useEffect(() => {  
+  if (!roadmapItems.length || !topic?.title) return;  
+
+  const index = roadmapItems.findIndex(  
+    (item) => item.title.toLowerCase() === topic.title.toLowerCase()  
+  );  
+
+  if (index !== -1 && roadmapItems[index + 1]) {  
+    setNextTopic(roadmapItems[index + 1]);  
+  } else {  
+    setNextTopic(null);  
+  }  
+}, [roadmapItems, topic]);
 
   // AUTO-SCROLL when messages change or streaming updates
   useEffect(() => {
@@ -162,14 +218,14 @@ export default function TopicDetailPage() {
 
     try {
       setMarking(true);
-      await fetch(`${API_BASE}/roadmap/complete`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ title: slug }),
-      });
+      await markTaskComplete(slug);
+
+        confetti({
+          particleCount: 150,
+          spread: 90,
+          origin: { y: 0.6 },
+          colors: ["#2563EB", "#60A5FA", "#FFFFFF"],
+        });
 
       setCelebrate(true);
       setTimeout(() => {
@@ -201,7 +257,7 @@ export default function TopicDetailPage() {
   if (!token) return;
 
   try {
-    await fetch(`${API_URL}/roadmap/topic/react`, {
+    await fetch(`${API_BASE}/roadmap/topic/react`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -217,6 +273,8 @@ export default function TopicDetailPage() {
     console.error("Reaction failed");
   }
 };
+
+
 
 const streamTopicAI = async (userText: string) => {
   if (!userText.trim() || isStreaming) return;
@@ -245,14 +303,14 @@ const streamTopicAI = async (userText: string) => {
 
     // 🔥 CREATE SESSION IF THIS IS A NEW CHAT
     if (!sessionId) {
-      const res = await fetch(`${API_URL}/roadmap/topic/chat/session`, {
+      const res = await fetch(`${API_BASE}/roadmap/topic/chat/session`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          topic_title: slug,               // topic
+          topic_title: title,               // topic
           preview_title: userMsg.content, // first user message as title
         }),
       });
@@ -265,14 +323,14 @@ const streamTopicAI = async (userText: string) => {
       loadChatSessions();
     }
 
-    const res = await fetch(`${API_URL}/roadmap/topic/ai`, {
+    const res = await fetch(`${API_BASE}/roadmap/topic/ai`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        topic_title: slug,
+        topic_title: title,
         session_id: sessionId,   // ✅ guaranteed now
         messages: [
           ...messages.map((m) => ({ role: m.role, content: m.content })),
@@ -333,7 +391,7 @@ const streamTopicAI = async (userText: string) => {
 
   try {
     const res = await fetch(
-      `${API_URL}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
+      `${API_BASE}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -355,10 +413,30 @@ const streamTopicAI = async (userText: string) => {
   }
 };
 
+const PRACTICE_IDEAS_BY_PHASE: Record<"foundation" | "core skills" | "advanced", string[]> = {
+  foundation: [
+    "Build a simple LED + resistor circuit on a breadboard",
+    "Simulate Ohm’s Law using Tinkercad or Proteus",
+    "Create a basic electromagnet using a coil and battery",
+    "Measure voltage & current using a multimeter",
+  ],
+  "core skills": [
+    "Design and simulate a rectifier circuit (AC → DC)",
+    "Build a regulated power supply (7805 / buck module)",
+    "Interface a sensor with a microcontroller (Arduino/STM32)",
+    "Design and test an RC low-pass filter",
+  ],
+  advanced: [
+    "Design a buck or boost converter",
+    "Implement PWM motor speed control",
+    "Create a custom PCB for a small sensor board",
+    "Analyze EMI in a switching power circuit",
+  ],
+};
 
 return (
   <div className="w-full relative">
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-10">
       {/* LEFT DARK NAVY PANEL */}
       {/*<div className="hidden lg:block lg:col-span-1 bg-[#020617] rounded-2xl" />*/}
 
@@ -369,7 +447,7 @@ return (
             maxWidth: showAI ? "calc(100% - 520px)" : "100%",
           }}
           transition={{ duration: 0.35, ease: "easeInOut" }}
-          className="mx-auto w-full max-w-[2000px] space-y-8 lg:col-span-11 px-6"
+          className="mx-auto w-full max-w-[1600px] space-y-10 lg:col-span-11 px-4 md:px-8 pt-0"
         >
 
         <div>
@@ -384,19 +462,26 @@ return (
             >
               Roadmap
             </span>{" "}
-            › Foundation › {topic.title}
+            ›{" "}
+            <span className="text-blue-600 font-medium">
+              {phaseLabel}
+            </span>{" "}
+            › {topic.title}
           </p>
 
           <span className="inline-block mt-2 text-xs px-3 py-1 rounded-full bg-blue-100 text-blue-600">
-            Foundation
+            {phaseLabel}
           </span>
         </div>
 
         <h1 className="text-4xl font-extrabold">{topic.title}</h1>
 
         {/* AI Explanation */}
-        <div className="rounded-2xl p-6 bg-gradient-to-br from-blue-600 to-blue-500 text-white shadow-xl">
-          <h3 className="font-semibold mb-2 flex items-center gap-3">
+        <div className="relative overflow-hidden rounded-3xl p-8 
+          
+          bg-gradient-to-br from-blue-600 via-blue-500 to-blue-700 
+          text-white shadow-[0_30px_80px_rgba(37,99,235,0.45)]">
+          <h3 className="font-semibold mb-3 text-lg tracking-wide flex items-center gap-3 relative z-10">
             <div className="relative">
               <div className="absolute inset-0 rounded-full bg-white/30 blur-md" />
               <motion.img
@@ -409,13 +494,16 @@ return (
             AI-Generated Explanation
           </h3>
 
-          <p className="text-sm leading-relaxed">
+          <p className="text-sm leading-relaxed text-blue-50/90 max-w-3xl">
             {topic.explanation}
           </p>
 
           <button
             onClick={() => { setShowAI(true); setAiMode("chat"); loadChatSessions(); setActiveSessionId(null); setMessages([]); }}
-            className="mt-4 bg-white text-blue-600 px-4 py-2 rounded-lg text-xs font-semibold hover:scale-[1.04] transition flex items-center gap-2"
+            className="mt-6 bg-white text-blue-600 px-5 py-2.5 rounded-xl text-xs font-semibold
+            border border-blue-200 transition-all duration-200
+            hover:-translate-y-[2px] hover:shadow-md
+            flex items-center gap-2"
           >
             <img src="/bluesparkle.png" className="w-6 h-6" />
             Ask AI a Question
@@ -423,21 +511,42 @@ return (
         </div>
 
         {/* What You'll Learn */}
-        <div className="rounded-2xl p-6 bg-[#020617] border border-blue-900/30 text-white">
-          <div className="flex justify-between cursor-pointer" onClick={() => setOpenLearn(!openLearn)}>
-            <h3>📘 What You’ll Learn</h3>
-            <span>{openLearn ? "▾" : "▸"}</span>
+        <div className="rounded-2xl p-6 bg-[#000926] border border-blue-900/40 text-white shadow-[0_6px_16px_rgba(0,9,38,0.35)]">
+          <div 
+            onClick={() => setOpenLearn(!openLearn)} 
+            className="flex items-center justify-between cursor-pointer group transition-all duration-300
+            hover:drop-shadow-[0_0_25px_rgba(79,131,255,0.45)]"
+          >
+            <h3 className="flex items-center gap-2">
+              📘 What You’ll Learn
+              <span className="text-xs text-blue-400 ml-2">
+                {topic.checklist?.length || 0} items
+              </span>
+            </h3>
+            <motion.span
+              animate={{ rotate: openPractice ? 180 : 0 }}
+              transition={{ duration: 0.25 }}
+              className="text-[#A6C5D7] group-hover:text-[#4F83FF] transition"
+            >
+              ▾
+            </motion.span>
           </div>
 
           {openLearn && (
             <ul className="mt-4 space-y-2">
-              {topic.checklist.map((item, i) => (
+              {(topic.checklist || []).map((item, i) => (
                 <motion.li
                   key={i}
                   whileHover={{ scale: 1.04 }}
-                  className="bg-[#0B254A]/70 border border-blue-900/30 rounded-lg px-4 py-2 cursor-pointer"
+                  className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 cursor-pointer
+                  transition-all duration-300 group
+                  hover:border-[#4F83FF]
+                  hover:shadow-[0_0_25px_rgba(79,131,255,0.45)]
+                  hover:scale-[1.01]"
                 >
-                  ➜ {item}
+                  <span className="text-[#D6E6F3] group-hover:text-blue-400 transition">
+                    ➜ {item}
+                  </span>
                 </motion.li>
               ))}
             </ul>
@@ -445,25 +554,37 @@ return (
         </div>
 
         {/* Practice */}
-        <div className="rounded-2xl p-6 bg-[#020617] border border-blue-900/30 text-white">
+        <div className="rounded-2xl p-6 bg-[#000926] border border-blue-900/40 text-white shadow-[0_6px_16px_rgba(0,9,38,0.35)]">
           <div className="flex justify-between cursor-pointer" onClick={() => setOpenPractice(!openPractice)}>
             <h3>💡 Practice Ideas & Mini Projects</h3>
-            <span>{openPractice ? "▾" : "▸"}</span>
+            <motion.span
+              animate={{ rotate: openPortfolio ? 180 : 0 }}
+              transition={{ duration: 0.25 }}
+              className="text-blue-400 group-hover:text-blue-300"
+            >
+              ▾
+            </motion.span>
           </div>
 
           {openPractice && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-              {["Portfolio site", "Multi-page site", "Accessible form", "Landing page"].map((idea, i) => (
+              {(PRACTICE_IDEAS_BY_PHASE[phaseLabel.toLowerCase() as "foundation" | "core skills" | "advanced"] || []).map(
+                (idea, i) => (
                 <motion.div
                   key={i}
                   whileHover={{ scale: 1.04 }}
-                  onClick={() => { setShowAI(true); setAiMode("ideas"); }}
-                  className="bg-[#0B254A]/70 border border-blue-900/30 rounded-xl p-4 cursor-pointer flex gap-3"
+                  className="bg-[#000926] border border-[#0F52BA] rounded-2xl p-5 flex gap-4
+                  transition-all duration-300 group
+                  hover:border-[#4F83FF]
+                  hover:shadow-[0_6px_18px_rgba(79,131,255,0.35)]
+                  hover:scale-[1.01]"
                 >
                   <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-blue-500/20 text-blue-400">
                     {i + 1}
                   </span>
-                  {idea}
+                  <span className="text-[#D6E6F3] group-hover:text-blue-400 transition">
+                    {idea}
+                  </span>
                 </motion.div>
               ))}
             </div>
@@ -471,10 +592,16 @@ return (
         </div>
 
         {/* Portfolio Tips */}
-        <div className="rounded-2xl p-6 bg-[#020617] border border-blue-900/30 text-white">
+        <div className="rounded-2xl p-6 bg-[#000926] border border-blue-900/40 text-white shadow-[0_6px_16px_rgba(0,9,38,0.35)]">
           <div className="flex justify-between cursor-pointer" onClick={() => setOpenPortfolio(!openPortfolio)}>
             <h3>🎯 Portfolio Improvement Tips</h3>
-            <span>{openPortfolio ? "▾" : "▸"}</span>
+            <motion.span
+              animate={{ rotate: openLearn ? 180 : 0 }}
+              transition={{ duration: 0.25 }}
+              className="text-blue-400 group-hover:text-blue-300"
+            >
+              ▾
+            </motion.span>
           </div>
 
           {openPortfolio && (
@@ -488,41 +615,81 @@ return (
                 <motion.li
                   key={i}
                   whileHover={{ scale: 1.04 }}
-                  className="bg-[#0B254A]/70 border border-blue-900/30 rounded-lg px-4 py-2 flex gap-3 items-center"
+                  className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 flex gap-3 items-center
+                  transition-all duration-300 group
+                  hover:border-[#4F83FF]
+                  hover:shadow-[0_6px_16px_rgba(79,131,255,0.3)]
+                  hover:scale-[1.005]"
                 >
                   <span className="h-10 w-10 rounded-full bg-blue-500/20 flex items-center justify-center">
                     <img src="/whitetick.png" className="w-7 h-7" />
                   </span>
-                  {tip}
+                  <span className="text-[#D6E6F3] group-hover:text-blue-400 transition">
+                    {tip}
+                  </span>
                 </motion.li>
               ))}
             </ul>
           )}
         </div>
 
+          <div className="rounded-2xl bg-blue-50 border border-blue-200 px-5 py-4 flex items-center justify-between mb-4">
+            <div>
+              <p className="text-xs text-blue-600 font-medium">Up Next in Your Journey</p>
+              <p className="font-semibold text-slate-900">
+                {nextTopic ? nextTopic.title : "You're all caught up 🎉"}
+              </p>
+            </div>
+
+            <button
+              onClick={() => {
+                if (!nextTopic) return;
+
+                const slugify = (s: string) =>
+                  s
+                    .toLowerCase()
+                    .trim()
+                    .replace(/['"]/g, "")
+                    .replace(/[^a-z0-9]+/g, "-")
+                    .replace(/^-+|-+$/g, "");
+
+                router.push(`/roadmap/${slugify(nextTopic.title)}`);
+              }}
+              className="text-blue-600 text-sm font-semibold hover:underline flex items-center gap-1"
+            >
+              Continue →
+            </button>
+          </div>
+
         {/* Bottom CTA */}
-          <div className="rounded-2xl p-6 bg-blue-50 border border-blue-300 flex justify-center gap-6">
-          <motion.button
-            whileHover={{ scale: 1.03 }}
-            onClick={markComplete}
-            className="group flex-1 py-3 rounded-xl bg-white/80 text-[#0000FF] border border-blue-600 hover:bg-gradient-to-br hover:from-blue-600 hover:to-blue-500 hover:text-white transition flex items-center justify-center gap-3 font-semibold"
-          >
-            <img src="/bluetick.png" className="w-10 h-10 group-hover:hidden" />
-            <img src="/whitetick.png" className="w-10 h-10 hidden group-hover:block" />
-            Completed! Mark as Incomplete?
-          </motion.button>
+          <div className="rounded-2xl bg-[#EAF4FF] p-6 border border-[#A6C5D7]">
+            <motion.button
+              onClick={markComplete}
+              className="w-full mb-3 py-3.5 rounded-xl bg-white text-blue-600 font-semibold
+              border border-blue-300 transition-all duration-200
+              hover:bg-[#000926] hover:text-white
+              hover:-translate-y-[2px] hover:shadow-md
+              flex items-center justify-center gap-3 group"
+            >
+              <img src="/bluetick.png" className="w-8 h-8 group-hover:hidden" />
+              <img src="/whitetick.png" className="w-8 h-8 hidden group-hover:block" />
+              Mark as Complete
+            </motion.button>
 
-          <button
-            onClick={() => { setShowAI(true); setAiMode("chat"); }}
-            className="group flex-1 py-3 rounded-xl bg-white/80 text-[#0000FF] border border-blue-600 hover:bg-gradient-to-br hover:from-blue-600 hover:to-blue-500 hover:text-white transition flex items-center justify-center gap-3 font-semibold"
-          >
-            <img src="/bluesparkle.png" className="w-10 h-10 group-hover:hidden" />
-            <img src="/whitesparkle.png" className="w-10 h-10 hidden group-hover:block" />
-            Ask AI for Help
-          </button>
-        </div>
-      </motion.div>
-
+            <button
+              
+              className="w-full py-3.5 rounded-xl bg-white text-blue-600 font-semibold
+              border border-blue-300 transition-all duration-200
+              hover:bg-[#000926] hover:text-white
+              hover:-translate-y-[2px] hover:shadow-md
+              flex items-center justify-center gap-3 group"
+            >
+              <img src="/bluesparkle.png" className="w-8 h-8 group-hover:hidden" />
+              <img src="/whitesparkle.png" className="w-8 h-8 hidden group-hover:block" />
+              Ask AI for Help
+            </button>
+          </div>
+          
       {/* AI CHATBOT */}
       <AnimatePresence>
         {showAI && (
@@ -530,7 +697,7 @@ return (
             initial={{ x: 80, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 80, opacity: 0 }}
-            className="fixed right-0 top-0 h-screen w-[520px] bg-[#EEF5FF] border-l border-blue-300 shadow-xl z-40 flex flex-col"
+            className="fixed top-0 right-0 bottom-0 w-[520px] bg-[#EEF5FF] border-l border-blue-300 shadow-xl z-40 flex flex-col"
           >
             <div className="bg-blue-600 p-4">
               <div className="flex items-center justify-between">
@@ -595,7 +762,7 @@ return (
                       if (!ok) return;
 
                       await fetch(
-                        `${API_URL}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
+                        `${API_BASE}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
                         {
                           method: "DELETE",
                           headers: { Authorization: `Bearer ${token}` },
@@ -634,7 +801,7 @@ return (
                                 if (!token) return;
 
                                 const res = await fetch(
-                                  `${API_URL}/roadmap/topic/chat?title=${encodeURIComponent(
+                                  `${API_BASE}/roadmap/topic/chat?title=${encodeURIComponent(
                                     topic.title
                                   )}&session_id=${s.id}`,
                                   { headers: { Authorization: `Bearer ${token}` } }
@@ -687,7 +854,7 @@ return (
 
                                       try {
                                         const res = await fetch(
-                                          `${API_URL}/roadmap/topic/chat/session/pin/${s.id}`,
+                                          `${API_BASE}/roadmap/topic/chat/session/pin/${s.id}`,
                                           { method: "POST", headers: { Authorization: `Bearer ${token}` } }
                                         );
 
@@ -721,7 +888,7 @@ return (
                                       const token = getToken();
                                       if (!token) return;
 
-                                      await fetch(`${API_URL}/roadmap/topic/chat/session/${s.id}`, {
+                                      await fetch(`${API_BASE}/roadmap/topic/chat/session/${s.id}`, {
                                         method: "DELETE",
                                         headers: { Authorization: `Bearer ${token}` },
                                       });
@@ -753,7 +920,7 @@ return (
             <motion.div
               layout
               transition={{ duration: 0.25, ease: "easeInOut" }}
-              className="flex-1 p-4 overflow-y-auto space-y-4 text-sm scroll-smooth"
+              className="flex-1 p-4 pt-2 overflow-y-auto space-y-4 text-sm scroll-smooth"
             >
               {messages.map((m, i) => (
                 <div
@@ -868,7 +1035,7 @@ return (
           </motion.aside>
         )}
       </AnimatePresence>
-
+    </motion.div>
     </div>
   </div>
 );

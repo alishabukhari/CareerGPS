@@ -7,6 +7,7 @@ from app.routers.auth import router as auth_router
 from app.routers.profile import router as profile_router
 from app.routers.roadmap import router as roadmap_router
 
+
 load_dotenv()
 
 app = FastAPI(title="CareerGPS API", version="0.1.0")

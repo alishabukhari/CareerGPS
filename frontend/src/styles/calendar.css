@@ -1,0 +1,229 @@
+/* Calendar wrapper */
+.fc {
+  width: 100% !important;
+  max-width: 100%;
+  box-sizing: border-box;
+  background: transparent !important;
+}
+
+/* Glass effect on date cells */
+.fc .fc-daygrid-day-frame {
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: 10px;
+}
+
+/* Make calendar taller to fill the card */
+.fc {
+  min-height: 480px;
+}
+
+.fc-view-harness {
+  min-height: 380px;
+}
+
+/* Prevent horizontal scroll */
+.fc-view-harness {
+  overflow-x: hidden;
+}
+
+/* Ultra-light grid lines (glass UI friendly) */
+.fc-theme-standard td,
+.fc-theme-standard th {
+  border-color: rgba(15, 23, 42, 0.04) !important;
+}
+
+/* Subtle hover glass lift */
+.fc .fc-daygrid-day-frame:hover {
+  background: rgba(255, 255, 255, 0.65);
+  transform: translateY(-1px);
+  transition: all 0.2s ease;
+}
+
+/* Toolbar container */
+.fc-toolbar {
+  background: #0A2540;
+  border-radius: 18px;
+  padding: 14px 16px;
+}
+
+/* Month + Year layout */
+.fc-toolbar-title {
+  color: white;
+  font-weight: 700;
+  font-size: 1.2rem;
+  line-height: 1.1;
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+}
+
+/* Center arrows inside nav buttons */
+.fc-prev-button,
+.fc-next-button {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+}
+
+/* Year smaller */
+.fc-toolbar-title::after {
+  content: attr(data-year);
+  display: block;
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+/* Buttons */
+.fc-button {
+  background: #2458E8;
+  border: none;
+  color: white;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.fc-button:hover {
+  background: #3b6cf5;
+}
+
+/* Smaller arrows */
+.fc-prev-button,
+.fc-next-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+/* Today highlight (blue) */
+.fc-day-today {
+  background: rgba(123, 157, 251, 0.637) !important;
+}
+
+/* Task highlight (orange) */
+.fc-daygrid-event {
+  background: #f59d06 !important;
+  border: none !important;
+  color: #0A2540 !important;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+/* Hover day */
+.fc-daygrid-day:hover {
+  background: rgba(255, 255, 255, 0.71);
+  cursor: pointer;
+}
+
+/* Kill internal scroll */
+.fc-scroller {
+  overflow: hidden !important;
+}
+
+/* Let calendar naturally expand */
+.fc-view-harness {
+  height: auto !important;
+  min-height: 380px;
+}
+
+/* ✅ Make the grid feel "complete" and evenly padded */
+.fc .fc-scrollgrid {
+  border-radius: 18px;
+  overflow: hidden;              /* clips grid to rounded corners */
+  width: 100% !important;
+}
+
+/* Ensure the internal tables stretch perfectly */
+.fc .fc-scrollgrid table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+}
+
+/* Add equal breathing room so right edge matches left edge */
+.fc .fc-scrollgrid-section-body > td,
+.fc .fc-scrollgrid-section-header > td {
+  padding-left: 0px !important;
+  padding-right: 2px !important;
+  padding-bottom: 0px !important;
+}
+
+/* Optional: keep header tight but aligned */
+.fc .fc-col-header {
+  margin: 0 !important;
+}
+
+/* Force header + body columns to align perfectly */
+.fc .fc-col-header,
+.fc .fc-daygrid-body {
+  table-layout: fixed !important;
+  width: 100% !important;
+}
+
+/* Remove any default padding/margins that shift columns */
+.fc .fc-col-header-cell,
+.fc .fc-daygrid-day {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Ensure each column uses identical width */
+.fc .fc-col-header-cell,
+.fc .fc-daygrid-day-frame {
+  width: 100% !important;
+  box-sizing: border-box;
+}
+
+/* Center weekday labels */
+.fc .fc-col-header-cell-cushion {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+/* Make the day highlight pill perfectly centered and fully visible */
+.fc .fc-daygrid-day-frame {
+  position: relative;
+  padding: 6px !important;          /* create breathing room for curves */
+}
+
+/* The blue "today" highlight */
+.fc-day-today .fc-daygrid-day-frame::before {
+  content: "";
+  position: absolute;
+  inset: 6px;                        /* equal spacing top/bottom/left/right */
+  border-radius: 18px;               /* symmetric curves */
+  background: rgba(36, 88, 232, 0.22);
+  z-index: 0;
+}
+
+/* Keep text above the highlight */
+.fc .fc-daygrid-day-number,
+.fc .fc-daygrid-event {
+  position: relative;
+  z-index: 1;
+}
+
+/* Tiny close button polish */
+.calendar-close {
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.calendar-close:hover {
+  opacity: 1;
+}
+
+/* Glassy yellow task chip */
+.fc-daygrid-event {
+  background: rgba(255, 170, 0, 0.85) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+}

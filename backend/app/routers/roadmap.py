@@ -49,14 +49,39 @@ class InitRoadmapRequest(BaseModel):
 def generate_ai_roadmap_for_role(role: str) -> dict:
     prompt = f"""
 Create a structured learning roadmap for a {role}.
-Return ONLY valid JSON in this format:
+
+Return ONLY valid JSON in this exact format:
 
 {{
   "target_role": "{role}",
   "phases": [
     {{
-      "phase": "Phase 1: ...",
-      "description": "...",
+      "phase": "Foundation",
+      "description": "Beginner fundamentals and core concepts.",
+      "items": [
+        {{
+          "title": "...",
+          "type": "course|project|reading",
+          "estimated_weeks": 1,
+          "why": "..."
+        }}
+      ]
+    }},
+    {{
+      "phase": "Core Skills",
+      "description": "Hands-on applied skills for real-world usage.",
+      "items": [
+        {{
+          "title": "...",
+          "type": "course|project|reading",
+          "estimated_weeks": 2,
+          "why": "..."
+        }}
+      ]
+    }},
+    {{
+      "phase": "Advanced",
+      "description": "Advanced professional-level topics and projects.",
       "items": [
         {{
           "title": "...",
@@ -68,6 +93,13 @@ Return ONLY valid JSON in this format:
     }}
   ]
 }}
+
+Rules:
+- Exactly 3 phases in this order: Foundation → Core Skills → Advanced
+- Each phase must contain 3 to 6 items
+- Titles must be short and unique
+- Do not include markdown
+- Do not include extra keys
 """
 
     res = client.chat.completions.create(
@@ -79,6 +111,7 @@ Return ONLY valid JSON in this format:
     content = res.choices[0].message.content.strip()
     start = content.find("{")
     end = content.rfind("}") + 1
+
     return json.loads(content[start:end])
 
 from postgrest.exceptions import APIError
@@ -146,6 +179,7 @@ Return ONLY valid JSON in this exact format (no extra text, no markdown):
 def get_roadmap(current_user=Depends(get_current_user)):
     supabase = get_supabase_admin()
     user_id = current_user["id"]
+    print("🧠 GET /roadmap user_id:", user_id)
 
     saved = _get_saved_roadmap(user_id, supabase)
 
@@ -159,25 +193,20 @@ def get_roadmap(current_user=Depends(get_current_user)):
     return roadmap_data
 
 
-@router.get("/roadmap/completed")
+@router.get("/completed")
 def get_completed(user=Depends(get_current_user)):
     supabase = get_supabase_admin()
     user_id = user["id"]
 
-    try:
-        res = (
-            supabase
-            .table("roadmap_progress")   # ✅ FIXED TABLE NAME
-            .select("title")
-            .eq("user_id", user_id)
-            .execute()
-        )
-    except APIError as e:
-        if "JWT expired" in str(e):
-            raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-        raise HTTPException(status_code=500, detail=str(e))
+    res = (
+        supabase
+        .table("roadmap_progress")
+        .select("task_title")
+        .eq("user_id", user_id)
+        .execute()
+    )
 
-    return {"completed": [r["title"] for r in (res.data or [])]}
+    return {"completed": [r["task_title"] for r in (res.data or [])]}
 
 @router.get("/stats")
 def get_stats(current_user=Depends(get_current_user)):
@@ -599,7 +628,8 @@ def init_roadmap(payload: InitRoadmapRequest, current_user=Depends(get_current_u
     supabase = get_supabase_admin()
     user_id = current_user["id"]
     role = payload.target_role
-
+    print("🚀 INIT roadmap for user:", user_id, "role:", role)
+    
     # Check if user already has roadmap
     existing = (
         supabase.table("user_roadmap")
@@ -611,7 +641,10 @@ def init_roadmap(payload: InitRoadmapRequest, current_user=Depends(get_current_u
     )
 
     if existing.data:
-        return {"status": "exists"}
+        return {
+        "status": "exists",
+        "target_role": role
+    }
 
     roadmap = generate_ai_roadmap_for_role(role)
 

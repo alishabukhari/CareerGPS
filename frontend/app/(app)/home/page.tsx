@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { getToken, clearToken } from "@/lib/auth";
+import StudyCalendar from "@/components/StudyCalendar";
+
 
 type Stats = {
   total: number;
@@ -25,10 +27,23 @@ export default function HomePage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [today, setToday] = useState<Today | null>(null);
   const [roadmapTitle, setRoadmapTitle] = useState<string>("");
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [name, setName] = useState<string | null>(
+    () => localStorage.getItem("full_name")
+  );
 
   const handleLogout = () => {
     clearToken();
     router.push("/login");
+  };
+  
+  const makeSlug = (title?: string) => {
+    if (!title) return "";
+    return title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-");
   };
 
   useEffect(() => {
@@ -37,6 +52,21 @@ export default function HomePage() {
       router.push("/login");
       return;
     }
+    
+      fetch("http://127.0.0.1:8000/profile", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          const serverName = data?.full_name || "";
+          setName(serverName);
+          localStorage.setItem("full_name", serverName); // keep cache fresh
+          setProfileLoaded(true);
+        })
+        .catch(() => setProfileLoaded(true));
+        const completed = stats?.completed ?? 0;
+        const total = stats?.total ?? 0;
+        const percent = stats?.percent ?? 0;
 
     fetch("http://127.0.0.1:8000/roadmap/stats", {
       headers: { Authorization: `Bearer ${token}` },
@@ -59,11 +89,13 @@ export default function HomePage() {
       .then((data) => setRoadmapTitle(data?.target_role || ""))
       .catch(() => {});
   }, [router]);
-
+    
+    
   const completed = stats?.completed ?? 0;
   const total = stats?.total ?? 0;
   const percent = stats?.percent ?? 0;
 
+  
   return (
     <div className="max-w-[1200px] mx-auto py-10">
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-8 items-start">
@@ -72,7 +104,7 @@ export default function HomePage() {
           {/* Greeting */}
           <div className="rounded-3xl bg-white p-8 shadow-lg">
             <h1 className="text-3xl font-bold text-[#0A2540] mb-1 flex items-center gap-2">
-              Hello Alisha <span className="wave">👋</span>
+              Hello {name || "there"} <span className="wave">👋</span>
             </h1>
             <p className="text-slate-600">Ready to start your day?</p>
           </div>
@@ -127,7 +159,11 @@ export default function HomePage() {
             </p>
 
             <button
-              onClick={() => router.push("/roadmap")}
+              onClick={() => {
+                const slug = makeSlug(today?.title);
+                if (!slug) return router.push("/roadmap");
+                router.push(`/roadmap/${slug}`);
+              }}
               className="bg-white text-blue-600 font-semibold px-5 py-2 rounded-lg transition hover:-translate-y-1 hover:shadow-lg"
             >
               Continue Learning →
@@ -139,30 +175,37 @@ export default function HomePage() {
           </div>
 
           {/* Bottom Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="rounded-2xl bg-[#1F2A3A] text-white p-6 shadow">
-              <p className="text-xs opacity-80 mb-1">Continue Learning</p>
-              <p className="text-blue-400 text-xs mb-1">{today?.phase || ""}</p>
-              <p className="font-semibold flex justify-between">
-                {today?.title || "—"} <span>→</span>
-              </p>
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div
+                onClick={() => {
+                  const slug = makeSlug(today?.title);
+                  if (!slug) return router.push("/roadmap");
+                  router.push(`/roadmap/${slug}`);
+                }}
+                className="rounded-2xl bg-[#1F2A3A] text-white p-6 shadow cursor-pointer hover:opacity-90 transition"
+              >
+                <p className="text-xs opacity-80 mb-1">Continue Learning</p>
+                <p className="text-blue-400 text-xs mb-1">{today?.phase || ""}</p>
+                <p className="font-semibold flex justify-between">
+                  {today?.title || "—"} <span>→</span>
+                </p>
+              </div>
 
-            <div
-              onClick={() => router.push("/roadmap")}
-              className="rounded-2xl bg-[#1F2A3A] text-white p-6 shadow cursor-pointer"
-            >
-              <p className="text-xs opacity-80 mb-1">Your Roadmap</p>
-              <p className="text-blue-400 text-xs mb-1">
-                {total} Topics
-              </p>
-              <p className="font-semibold flex justify-between">
-                {roadmapTitle || "View complete learning path"} <span>→</span>
-              </p>
+              <div
+                onClick={() => router.push("/roadmap")}
+                className="rounded-2xl bg-[#1F2A3A] text-white p-6 shadow cursor-pointer"
+              >
+                <p className="text-xs opacity-80 mb-1">Your Roadmap</p>
+                <p className="text-blue-400 text-xs mb-1">
+                  {total} Topics
+                </p>
+                <p className="font-semibold flex justify-between">
+                  {roadmapTitle || "View complete learning path"} <span>→</span>
+                </p>
+              </div>
             </div>
-          </div>
         </div>
-
+        
         {/* RIGHT */}
         <div className="space-y-6">
           <div className="rounded-3xl bg-white p-4 shadow-xl">
@@ -175,9 +218,10 @@ export default function HomePage() {
               priority
             />
           </div>
-
-          <div className="h-[220px] rounded-3xl border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-sm">
-            Calendar coming here 📅
+          
+           {/* Glass wrapper */}
+          <div className="rounded-3xl bg-white/40 backdrop-blur-xl p-4 shadow-xl">
+            <StudyCalendar />
           </div>
         </div>
       </div>
