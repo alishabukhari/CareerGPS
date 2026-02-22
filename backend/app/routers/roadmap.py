@@ -10,6 +10,7 @@ import json
 import os
 from openai import OpenAI
 from postgrest.exceptions import APIError
+import re
 
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -103,7 +104,7 @@ Rules:
 """
 
     res = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-4.1-2025-04-14",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.4,
     )
@@ -144,7 +145,7 @@ Return ONLY valid JSON in this exact format (no extra text, no markdown):
 """
 
         res = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-4.1-2025-04-14",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.6,
         )
@@ -169,7 +170,43 @@ Return ONLY valid JSON in this exact format (no extra text, no markdown):
                 f"Write notes on {title}",
             ],
         )
-    
+
+def create_stream(messages):
+    return client.chat.completions.create(
+        model="gpt-4.1-2025-04-14",
+        messages=messages,
+        temperature=0.6,
+        stream=True,
+        timeout=30,
+    )
+
+def prettify_code_block(text: str) -> str:
+    if "CODE:" not in text or "END CODE" not in text:
+        return text
+
+    before, rest = text.split("CODE:", 1)
+    code, after = rest.split("END CODE", 1)
+
+    raw = code.strip()
+
+    # Hard newline normalization
+    raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Break common JS/TS/Python patterns safely
+    raw = re.sub(r";\s*", ";\n", raw)
+    raw = re.sub(r"\{\s*", "{\n", raw)
+    raw = re.sub(r"\}\s*", "\n}\n", raw)
+    raw = re.sub(r"\)\s*\{", ")\n{", raw)
+    raw = re.sub(r",\s*", ", ", raw)
+
+    # Prevent one-line functions
+    raw = re.sub(r"(function\s+[^{]+\{)", r"\1\n", raw)
+
+    # Remove extra blank lines
+    lines = [l.rstrip() for l in raw.split("\n") if l.strip() != ""]
+    formatted = "\n".join(lines)
+
+    return f"{before.strip()}\n\nCODE:\n{formatted}\nEND CODE\n{after.strip()}"
 
 # ======================
 # Routes
@@ -450,16 +487,55 @@ async def topic_ai_chat(payload: TopicChatRequest, current_user=Depends(get_curr
     if not payload.messages:
         raise HTTPException(status_code=400, detail="messages required")
 
-    topic = payload.topic_title or payload.topic_slug or "this topic"
+    topic = payload.topic_title or payload.topic_slug or "general"
 
-    system_prompt = (
-        f"You are a friendly learning assistant for the topic: {topic}. "
-        "Give clear, short explanations, examples, and next steps. "
-        "Use bullet points when helpful."
-    )
+    system_prompt = f"""
+    You are a friendly AI tutor inside a student app called CareerGPS.
 
-    if payload.mode == "eli5":
-        system_prompt += " Explain everything like I am 5 years old. Use very simple words and short sentences."
+    When the user asks for code or programming help, ALWAYS reply in this structure:
+
+    1) Start with 1–2 friendly opening lines.
+    2) Briefly explain what the code will do (2–4 short lines).
+    3) Then write:
+    CODE:
+    <code goes here, clean, readable, properly spaced, each statement on its own line>
+    END CODE
+    4) After the code, explain what each important part does in simple English.
+    5) End with 1 short follow-up question.
+
+    Formatting rules:
+    - Do NOT use markdown symbols like ###, **, or ``` .
+    - Put code ONLY between:
+    CODE:
+    ...
+    END CODE
+    - Keep sentences short.
+    - Be human and friendly, not robotic.
+    - When you write code:
+    - When you write code:
+    - Output code as if it will be displayed in a code editor.
+    - Every statement MUST be on its own line.
+    - Braces MUST be on their own lines.
+    - NEVER compress code into one line.
+    - NEVER return inline code blocks.
+    - Add real newline characters.
+    Tone:
+    - Like a helpful senior student explaining to a junior.
+
+    Style rules:
+    - Sound like a real senior student.
+    - Write like you are chatting in a study group.
+    - Use short, natural sentences.
+    - Avoid formal AI phrasing.
+    - No corporate tone.
+
+    Context:
+    The current learning topic is: {topic}.
+    If the user asks something unrelated, still answer clearly and kindly.
+    """
+
+    if getattr(payload, "mode", None) == "eli5":
+        system_prompt += "\nExplain everything like you ar talking to a 10 year old. Use very simple words."
 
     async def sse_stream() -> AsyncGenerator[bytes, None]:
         yield b"data: \n\n"
@@ -472,11 +548,19 @@ async def topic_ai_chat(payload: TopicChatRequest, current_user=Depends(get_curr
         full_response_text = ""
 
         stream = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-4.1-2025-04-14",
             messages=messages,
             temperature=0.6,
             stream=True,
         )
+
+        try:
+            stream = create_stream(messages)
+        except Exception as e:
+            print("❌ OpenAI init failed:", e)
+            yield "data: AI service is busy. Please try again.\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
+            return
 
         for chunk in stream:
             try:
@@ -488,6 +572,15 @@ async def topic_ai_chat(payload: TopicChatRequest, current_user=Depends(get_curr
             except Exception as e:
                 print("Streaming chunk error:", e)
 
+        # ✅ Post-process ONCE (not during streaming)
+        try:
+            full_response_text = prettify_code_block(full_response_text)
+        except Exception as e:
+            print("Prettify failed:", e)    
+        
+        if not payload.session_id:
+          raise HTTPException(status_code=400, detail="session_id required")
+    
         supabase.table("topic_chat_messages").insert([
             {
                 "user_id": current_user["id"],
@@ -518,7 +611,7 @@ async def topic_ai_chat(payload: TopicChatRequest, current_user=Depends(get_curr
                 title_prompt = f"Generate a short 3-5 word title for this conversation:\n{full_response_text[:300]}"
 
                 title_res = client.chat.completions.create(
-                    model="gpt-4.1-mini",
+                    model="gpt-4.1-2025-04-14",
                     messages=[{"role": "user", "content": title_prompt}],
                     temperature=0.3,
                 )

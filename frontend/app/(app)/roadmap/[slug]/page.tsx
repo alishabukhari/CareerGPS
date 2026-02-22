@@ -27,7 +27,7 @@ type ChatSession = {
   id: string;
   preview_title: string | null;
   created_at: string;
-  is_pinned?: boolean;
+  is_pinned: boolean;
 };
 
 const groupSessionsByDate = (sessions: ChatSession[]) => {
@@ -65,7 +65,7 @@ export default function TopicDetailPage() {
   const rawSlug = decodeURIComponent(params.slug as string);
   const title = rawSlug.replace(/-/g, " ");
   const slug = decodeURIComponent(params.slug as string);
- 
+  const [copied, setCopied] = useState(false);
 
   const [topic, setTopic] = useState<TopicData | null>(null);
   
@@ -105,7 +105,20 @@ const phaseLabel = phase.includes("core")
   ? "Advanced"
   : "Foundation";
 
- 
+ useEffect(() => {  
+  if (!roadmapItems.length || !topic?.title) return;  
+
+  const index = roadmapItems.findIndex(  
+    (item) => item.title.toLowerCase() === topic.title.toLowerCase()  
+  );  
+
+  if (index !== -1 && roadmapItems[index + 1]) {  
+    setNextTopic(roadmapItems[index + 1]);  
+  } else {  
+    setNextTopic(null);  
+  }  
+}, [roadmapItems, topic]);
+
   useEffect(() => {
     
     if (hasFetched.current) return;
@@ -156,41 +169,12 @@ const phaseLabel = phase.includes("core")
       }
     };
 
-    loadRoadmapItems();
-
-    const loadChatHistory = async () => {
-      try {
-        const token = getToken();
-        const res = await fetch(
-          `${API_BASE}/roadmap/topic/chat?title=${encodeURIComponent(title)}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setMessages(data.messages || []);
-        }
-      } catch {
-        setMessages([]);
-      }
-    };
 
     loadTopic();
-    loadChatHistory();
-  }, [slug, router]);
+  loadRoadmapItems();
+}, [slug, router]);
 
-  useEffect(() => {  
-  if (!roadmapItems.length || !topic?.title) return;  
 
-  const index = roadmapItems.findIndex(  
-    (item) => item.title.toLowerCase() === topic.title.toLowerCase()  
-  );  
-
-  if (index !== -1 && roadmapItems[index + 1]) {  
-    setNextTopic(roadmapItems[index + 1]);  
-  } else {  
-    setNextTopic(null);  
-  }  
-}, [roadmapItems, topic]);
 
   // AUTO-SCROLL when messages change or streaming updates
   useEffect(() => {
@@ -361,11 +345,12 @@ const streamTopicAI = async (userText: string) => {
         if (!line.startsWith("data:")) continue;
 
         const data = line.replace(/^data:\s?/, "");
+
         if (data === "[DONE]") break;
 
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === assistantId && !m.content.endsWith(data)
               ? { ...m, content: m.content + data }
               : m
           )
@@ -376,7 +361,7 @@ const streamTopicAI = async (userText: string) => {
     setMessages((prev) =>
       prev.map((m) =>
         m.role === "assistant" && m.content === ""
-          ? { ...m, content: "⚠️ AI failed. Try again." }
+          ? { ...m, content: "⚠️ AI had a hiccup. Tap regenerate to try again." }
           : m
       )
     );
@@ -390,26 +375,19 @@ const streamTopicAI = async (userText: string) => {
   if (!token || !topic?.title) return;
 
   try {
+    setLoadingSessions(true);
+
     const res = await fetch(
       `${API_BASE}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
     const data = await res.json();
-
-    console.log(
-      "🔁 sessions after pin:",
-      data.sessions.map((s: any) => ({
-        id: s.id,
-        preview_title: s.preview_title,
-        is_pinned: s.is_pinned,
-        keys: Object.keys(s),
-      }))
-    );
-
     setChatSessions(data.sessions || []);
   } catch {
     setChatSessions([]);
+  } finally {
+    setLoadingSessions(false);
   }
 };
 
@@ -433,6 +411,47 @@ const PRACTICE_IDEAS_BY_PHASE: Record<"foundation" | "core skills" | "advanced",
     "Analyze EMI in a switching power circuit",
   ],
 };
+
+function renderMessage(content: string) {
+  const parts = content.split(/CODE:|END CODE/);
+
+  if (parts.length === 3) {
+    const before = parts[0].trim();
+    const code = "\n" + parts[1].trim() + "\n";
+    const after = parts[2].trim();
+
+    return (
+      <div className="space-y-3">
+        {before && <p>{before}</p>}
+
+        <div className="relative rounded-xl overflow-hidden bg-slate-900">
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(code);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1200);
+            }}
+            className={`absolute top-2 right-2 text-[11px] px-2 py-1 rounded transition ${
+              copied
+                ? "bg-green-500 text-white"
+                : "bg-white/10 text-white hover:bg-white/20"
+            }`}
+          >
+            {copied ? "Copied!" : "Copy"}
+          </button>
+
+          <pre className="text-slate-100 pt-8 pb-4 px-4 overflow-x-auto text-xs leading-relaxed">
+            <code className="whitespace-pre-wrap leading-relaxed">{code}</code>
+          </pre>
+        </div>
+
+        {after && <p>{after}</p>}
+      </div>
+    );
+  }
+
+  return <p className="whitespace-pre-wrap">{content}</p>;
+}
 
 return (
   <div className="w-full relative">
@@ -677,7 +696,13 @@ return (
             </motion.button>
 
             <button
-              
+              onClick={() => {
+                setShowAI(true);
+                setAiMode("chat");
+                loadChatSessions();     // 🔥 this is what was missing
+                setActiveSessionId(null);
+                setMessages([]);
+              }}
               className="w-full py-3.5 rounded-xl bg-white text-blue-600 font-semibold
               border border-blue-300 transition-all duration-200
               hover:bg-[#000926] hover:text-white
@@ -697,7 +722,7 @@ return (
             initial={{ x: 80, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 80, opacity: 0 }}
-            className="fixed top-0 right-0 bottom-0 w-[520px] bg-[#EEF5FF] border-l border-blue-300 shadow-xl z-40 flex flex-col"
+            className="fixed -top-11 right-0 bottom-0 w-[520px] bg-[#EEF5FF] border-l border-blue-300 shadow-xl z-40 flex flex-col"
           >
             <div className="bg-blue-600 p-4">
               <div className="flex items-center justify-between">
@@ -720,16 +745,23 @@ return (
 
                 <div className="flex gap-2 items-center">
                   <button
-                    onClick={() => setShowHistory((v) => !v)}
+                    onClick={() => {
+                      setShowHistory((v) => {
+                        const next = !v;
+                        if (next) loadChatSessions(); // 🔥 load when opening history
+                        return next;
+                      });
+                    }}
                     className="text-white/90 hover:text-white text-xs border border-white/40 px-3 py-1 rounded-full hover:bg-white/20 transition"
                   >
                     {showHistory ? "Hide history ▲" : "Show history ▼"}
                   </button>
 
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setActiveSessionId(null);
                       setMessages([]);
+                      await loadChatSessions();
                     }}
                     className="text-white text-xs border border-white/40 px-3 py-1 rounded-full hover:bg-white/20 transition"
                   >
@@ -746,7 +778,15 @@ return (
               </div>
             </div>
 
-              {showHistory && chatSessions.length > 0 && (
+              {showHistory && (
+                <>
+                {loadingSessions && (
+                  <p className="text-xs text-slate-400">Loading chats…</p>
+                )}
+
+                {!loadingSessions && chatSessions.length === 0 && (
+                  <p className="text-xs text-slate-400">No chats yet</p>
+                )}
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
@@ -915,99 +955,99 @@ return (
                     </div>
                   ))}
                 </motion.div>
+              </>
               )}
 
             <motion.div
-              layout
-              transition={{ duration: 0.25, ease: "easeInOut" }}
-              className="flex-1 p-4 pt-2 overflow-y-auto space-y-4 text-sm scroll-smooth"
+            layout
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+            className="flex-1 p-4 pt-2 overflow-y-auto space-y-4 text-sm scroll-smooth"
+          >
+            {messages.map((m, i) => (
+            <div
+              key={m.id || `${m.role}-${i}`}
+              className={`flex gap-3 items-start ${m.role === "user" ? "justify-end" : ""}`}
             >
-              {messages.map((m, i) => (
+              {/* Assistant avatar */}
+              {m.role === "assistant" && (
+                <span className="h-10 w-10 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0">
+                  <img src="/bluebot.png" className="w-8 h-8" />
+                </span>
+              )}
+
+              {/* Message + reactions column */}
+              <div className="flex flex-col max-w-[85%]">
+                {/* Message bubble */}
                 <div
-                  key={m.id || `${m.role}-${i}`}
-                  className={`flex gap-3 items-start ${m.role === "user" ? "justify-end" : ""}`}
+                  className={`px-4 py-3 rounded-2xl inline-block max-w-full break-words whitespace-pre-wrap leading-relaxed text-[13px] ${
+                    m.role === "assistant"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white border text-slate-800"
+                  }`}
+                  style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
                 >
-                  {m.role === "assistant" && (
-                    <span className="h-10 w-10 rounded-full bg-blue-500/20 flex items-center justify-center">
-                      <img src="/bluebot.png" className="w-8 h-8" />
-                    </span>
-                  )}
-
-                  <div className="flex flex-col max-w-[85%]">
-                    <div
-                      className={`px-4 py-3 rounded-2xl inline-block w-fit break-words whitespace-pre-line leading-relaxed ${
-                        m.role === "assistant"
-                          ? "bg-blue-600 text-white"
-                          : "bg-white border text-slate-800"
-                    }`}
-                    >
-                      {m.content || (isStreaming && m.role === "assistant" && (
+                  {m.content
+                    ? renderMessage(m.content)
+                    : isStreaming && m.role === "assistant" && (
                         <div className="flex items-center gap-1 h-5">
-                         <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:0ms]" />
-                         <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:150ms]" />
-                         <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:300ms]" />
+                          <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:0ms]" />
+                          <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:150ms]" />
+                          <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:300ms]" />
                         </div>
-                      ))}
-                    </div>
-
-                    {m.role === "assistant" && !isStreaming && (
-                      <div className="flex gap-2 mt-1 ml-1">
-                        <img
-                          src="/copy.png"
-                          title="Copy"
-                          className="w-8 h-8 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 active:scale-90 transition"
-                          onClick={() => {
-                          navigator.clipboard.writeText(m.content);
-                          setShowCopied(true);
-                          setTimeout(() => setShowCopied(false), 1200);
-                         }}
-                        />
-                        <img
-                          src="/like.png"
-                          title="Like"
-                          className="w-8 h-8 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 active:scale-90 transition"
-                          onClick={() => reactToMessage(m.content, "like")}
-                        />
-                        <img
-                          src="/dislike.png"
-                          title="Dislike"
-                          className="w-8 h-8 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 active:scale-90 transition"
-                          onClick={() => reactToMessage(m.content, "dislike")}
-                        />
-                        <img
-                          src="/share.png"
-                          title="Share vis Gmail"
-                          className="w-8 h-8 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 active:scale-90 transition"
-                          onClick={() => {
-                            const subject = encodeURIComponent(`CareerGPS – ${topic.title}`);
-                            const body = encodeURIComponent(m.content);
-                            window.open(
-                              `https://mail.google.com/mail/?view=cm&fs=1&su=${subject}&body=${body}`,
-                              "_blank"
-                            );
-                          }}
-                        />
-                  
-                        <img
-                          src="/regenerate.png"
-                          title="Regenerate"
-                          className="w-8 h-8 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 active:scale-90 transition"
-                          onClick={() => streamTopicAI(messages[messages.length - 2]?.content ||"")}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {m.role === "user" && (
-                    <span className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center">
-                      <img src="/person.png" className="w-7 h-7" />
-                    </span>
-                  )}
+                      )}
                 </div>
-              ))}
 
-              <div ref={messagesEndRef} />
-            </motion.div>
+                {/* Reactions BELOW the bubble */}
+                {m.role === "assistant" && !isStreaming && (
+                  <div className="flex gap-2 mt-2 ml-2">
+                    <img
+                      src="/copy.png"
+                      title="Copy"
+                      className="w-7 h-7 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition"
+                      onClick={() => {
+                        navigator.clipboard.writeText(m.content);
+                        setShowCopied(true);
+                        setTimeout(() => setShowCopied(false), 1200);
+                      }}
+                    />
+
+                    <img
+                      src="/like.png"
+                      title="Like"
+                      className="w-7 h-7 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition"
+                      onClick={() => reactToMessage(m.content, "like")}
+                    />
+
+                    <img
+                      src="/dislike.png"
+                      title="Dislike"
+                      className="w-7 h-7 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition"
+                      onClick={() => reactToMessage(m.content, "dislike")}
+                    />
+
+                    <img
+                      src="/regenerate.png"
+                      title="Regenerate"
+                      className="w-7 h-7 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition"
+                      onClick={() =>
+                        streamTopicAI(messages[messages.length - 2]?.content || "")
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* User avatar */}
+              {m.role === "user" && (
+                <span className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center shrink-0">
+                  <img src="/person.png" className="w-7 h-7" />
+                </span>
+              )}
+            </div>
+          ))}
+
+            <div ref={messagesEndRef} />
+          </motion.div>
             
             {showCopied && (
               <div className="absolute bottom-16 right-6 bg-black/80 text-white text-xs px-3 py-1 rounded-full shadow-lg animate-pulse">
@@ -1038,5 +1078,5 @@ return (
     </motion.div>
     </div>
   </div>
-);
+)
 }
