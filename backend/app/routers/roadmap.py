@@ -40,8 +40,18 @@ class CreateChatSessionRequest(BaseModel):
 class RenameChatSessionRequest(BaseModel):
     title: str      
 
+class TopicContentItem(BaseModel):
+    id: str
+    title: str
+    content: dict
+
 class InitRoadmapRequest(BaseModel):
     target_role: str
+
+class SubslugRequest(BaseModel):
+    slug: str
+    subslug: str
+    type: Literal["learn", "projects", "portfolio"]
 
 # ======================
 # Helpers
@@ -170,6 +180,69 @@ Return ONLY valid JSON in this exact format (no extra text, no markdown):
                 f"Write notes on {title}",
             ],
         )
+
+def generate_ai_topic_content(topic_title: str, content_type: str) -> dict:
+    prompt = f"""
+You are generating structured learning content for a student app called CareerGPS.
+
+Topic: {topic_title}
+Page type: {content_type}
+
+Return ONLY valid JSON in this exact format:
+
+{{
+  "page_title": "{topic_title}",
+  "explanation": "Short friendly explanation of this topic",
+  "items": [
+    {{
+      "id": "item-1",
+      "title": "Short title",
+      "content": {{
+        "definition": "...",
+        "formula": "...",
+        "real_world": "...",
+        "example": "..."
+      }}
+    }}
+  ]
+}}
+
+Rules:
+- No markdown
+- No extra keys
+- Beginner friendly
+- items length: 3 to 6
+"""
+
+    res = client.chat.completions.create(
+        model="gpt-4.1-2025-04-14",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.4,
+    )
+
+    content = res.choices[0].message.content.strip()
+    start = content.find("{")
+    end = content.rfind("}") + 1
+
+    return json.loads(content[start:end])
+
+
+def generate_ai_quiz(title: str, subslug: str):
+    prompt = f"""
+Generate 5 multiple choice questions for topic {title} - {subslug}.
+Return ONLY JSON:
+
+{{
+  "questions": [
+    {{
+      "q": "...",
+      "options": ["A", "B", "C", "D"],
+      "answer": "A"
+    }}
+  ]
+}}
+"""
+
 
 def create_stream(messages):
     return client.chat.completions.create(
@@ -443,6 +516,56 @@ def list_chat_sessions(topic_title: str, current_user=Depends(get_current_user))
 
     return {"sessions": rows.data or []}
 
+@router.get("/topic/content")
+def get_topic_content(slug: str, type: str, current_user=Depends(get_current_user)):
+    supabase = get_supabase_admin()
+    user_id = current_user["id"]
+
+    clean_slug = slug.strip().lower()
+
+    # 1️⃣ Get user's target_role
+    role_res = (
+        supabase.table("user_roadmap")
+        .select("target_role")
+        .eq("user_id", user_id)
+        .order("updated_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not role_res.data:
+        raise HTTPException(status_code=400, detail="User roadmap not initialized")
+
+    target_role = role_res.data[0]["target_role"]
+
+    # 2️⃣ Try cache (SAFE)
+    cached = (
+        supabase.table("topic_content_ai_cache")
+        .select("page_title, explanation, items")
+        .eq("slug", clean_slug)
+        .eq("type", type)
+        .limit(1)
+        .execute()
+    )
+
+    if cached.data and len(cached.data) > 0:
+        return cached.data[0]
+
+    # 3️⃣ Generate with AI
+    topic_title = clean_slug.replace("-", " ").title()
+    data = generate_ai_topic_content(topic_title, type)
+
+    # 4️⃣ Save to cache (FIXED TABLE NAME)
+    supabase.table("topic_content_ai_cache").insert({
+        "target_role": target_role,
+        "slug": clean_slug,
+        "type": type,
+        "page_title": data["page_title"],
+        "explanation": data["explanation"],
+        "items": data["items"],
+    }).execute()
+
+    return data
 
 @router.post("/complete")
 def complete_task(body: CompleteTaskRequest, current_user=Depends(get_current_user)):
@@ -487,7 +610,7 @@ async def topic_ai_chat(payload: TopicChatRequest, current_user=Depends(get_curr
     if not payload.messages:
         raise HTTPException(status_code=400, detail="messages required")
 
-    topic = payload.topic_title or payload.topic_slug or "general"
+    topic = (payload.topic_title or payload.topic_slug or "general").strip()
 
     system_prompt = f"""
     You are a friendly AI tutor inside a student app called CareerGPS.
@@ -547,13 +670,6 @@ async def topic_ai_chat(payload: TopicChatRequest, current_user=Depends(get_curr
 
         full_response_text = ""
 
-        stream = client.chat.completions.create(
-            model="gpt-4.1-2025-04-14",
-            messages=messages,
-            temperature=0.6,
-            stream=True,
-        )
-
         try:
             stream = create_stream(messages)
         except Exception as e:
@@ -579,8 +695,11 @@ async def topic_ai_chat(payload: TopicChatRequest, current_user=Depends(get_curr
             print("Prettify failed:", e)    
         
         if not payload.session_id:
-          raise HTTPException(status_code=400, detail="session_id required")
-    
+            print("❌ Missing session_id in SSE request")
+            yield b"data: Missing session. Please start a new chat.\n\n"
+            yield b"data: [DONE]\n\n"
+            return
+        
         supabase.table("topic_chat_messages").insert([
             {
                 "user_id": current_user["id"],
@@ -603,11 +722,15 @@ async def topic_ai_chat(payload: TopicChatRequest, current_user=Depends(get_curr
                 supabase.table("chat_sessions")
                 .select("preview_title")
                 .eq("id", payload.session_id)
-                .single()
                 .execute()
             )
 
-            if session.data and session.data.get("preview_title") in ["New chat", None]:
+            if not session.data:
+                print("⚠️ Session not found during rename")
+                yield b"data: [DONE]\n\n"
+                return
+
+            if session.data and session.data[0].get("preview_title") in ["New chat", None]:
                 title_prompt = f"Generate a short 3-5 word title for this conversation:\n{full_response_text[:300]}"
 
                 title_res = client.chat.completions.create(

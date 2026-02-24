@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { getToken } from "@/lib/auth";
 import { markTaskComplete } from "@/lib/roadmapApi";
 import confetti from "canvas-confetti";
+import Link from "next/link";
 
 const API_BASE = "http://127.0.0.1:8000";
 
@@ -27,7 +28,7 @@ type ChatSession = {
   id: string;
   preview_title: string | null;
   created_at: string;
-  is_pinned: boolean;
+  is_pinned?: boolean | null;
 };
 
 const groupSessionsByDate = (sessions: ChatSession[]) => {
@@ -38,7 +39,7 @@ const groupSessionsByDate = (sessions: ChatSession[]) => {
 
   // ✅ Sort pinned chats to top, then by date
   const sortedSessions = [...sessions].sort((a, b) => {
-    const pinDiff = Number(b.is_pinned) - Number(a.is_pinned);
+    const pinDiff = Number(!!b.is_pinned) - Number(!!a.is_pinned);
     if (pinDiff !== 0) return pinDiff;
 
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -94,7 +95,6 @@ export default function TopicDetailPage() {
   const pinnedCount = chatSessions.filter(s => s.is_pinned).length;
   const [roadmapItems, setRoadmapItems] = useState<{ title: string }[]>([]);
   const [nextTopic, setNextTopic] = useState<{ title: string } | null>(null);
-  const hasFetched = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const phase = topic?.phase?.toLowerCase() || "";
@@ -120,59 +120,49 @@ const phaseLabel = phase.includes("core")
 }, [roadmapItems, topic]);
 
   useEffect(() => {
-    
-    if (hasFetched.current) return;
-    hasFetched.current = true;
+  const token = getToken();
+  if (!token) {
+    router.push("/login");
+    return;
+  }
 
-    const token = getToken();
-    if (!token) {
-      router.push("/login");
-      return;
+  const loadTopic = async () => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/roadmap/topic?title=${encodeURIComponent(title)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error("Failed topic fetch");
+      const data = await res.json();
+      setTopic(data);
+    } catch {
+      setError("Failed to load topic.");
+    } finally {
+      setLoading(false);
     }
+  };
 
-    const loadTopic = async () => {
-      try {
-        const res = await fetch(
-          `${API_BASE}/roadmap/topic?title=${encodeURIComponent(title)}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const data = await res.json();
-        setTopic(data);
-      } catch {
-        setError("Failed to load topic.");
-      } finally {
-        setLoading(false);
-      }
-    };
+  const loadRoadmapItems = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/roadmap`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
 
-    const loadRoadmapItems = async () => {
-      const token = getToken();
-      if (!token) return;
+      const data = await res.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      const allItems = parsed.phases.flatMap((p: any) => p.items);
+      setRoadmapItems(allItems);
+    } catch {}
+  };
 
-      try {
-        const res = await fetch(`${API_BASE}/roadmap`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+  setTopic(null);
+  setMessages([]);
+  setActiveSessionId(null);
 
-        if (!res.ok) return;
-
-        const data = await res.json();
-
-        const parsed = typeof data === "string" ? JSON.parse(data) : data;
-
-        const allItems = parsed.phases.flatMap((p: any) => p.items);
-
-        setRoadmapItems(allItems);
-
-      } catch (err) {
-        console.error("Failed to load roadmap items", err);
-      }
-    };
-
-
-    loadTopic();
+  loadTopic();
   loadRoadmapItems();
-}, [slug, router]);
+}, [slug]);
 
 
 
@@ -248,7 +238,7 @@ const phaseLabel = phase.includes("core")
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        topic_title: topic.title,
+        topic_title: title,
         message,
         reaction,
       }),
@@ -372,15 +362,20 @@ const streamTopicAI = async (userText: string) => {
 
   const loadChatSessions = async () => {
   const token = getToken();
-  if (!token || !topic?.title) return;
+  if (!token || !topic?.title) {
+    console.warn("loadChatSessions skipped: topic not ready");
+    return;
+  }
 
   try {
     setLoadingSessions(true);
 
     const res = await fetch(
-      `${API_BASE}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
+      `${API_BASE}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(title)}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
+
+    if (!res.ok) throw new Error("Sessions fetch failed");
 
     const data = await res.json();
     setChatSessions(data.sessions || []);
@@ -553,25 +548,40 @@ return (
 
           {openLearn && (
             <ul className="mt-4 space-y-2">
-              {(topic.checklist || []).map((item, i) => (
-                <motion.li
-                  key={i}
-                  whileHover={{ scale: 1.04 }}
-                  className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 cursor-pointer
-                  transition-all duration-300 group
-                  hover:border-[#4F83FF]
-                  hover:shadow-[0_0_25px_rgba(79,131,255,0.45)]
-                  hover:scale-[1.01]"
-                >
-                  <span className="text-[#D6E6F3] group-hover:text-blue-400 transition">
-                    ➜ {item}
-                  </span>
-                </motion.li>
-              ))}
+              {(topic.checklist || []).map((item, i) => {
+                // create a subslug from the item text
+                const subslug = item
+                  .toLowerCase()
+                  .replace(/’/g, "")      // remove curly apostrophe
+                  .replace(/'/g, "")      // remove normal apostrophe
+                  .replace(/[^\w\s-]/g, "") // remove symbols like ×, =, etc.
+                  .replace(/\s+/g, "-");  // spaces -> dashes
+
+                return (
+                  <Link
+                    key={i}
+                    href={`/roadmap/${slug}/learn/${subslug}`}
+                    className="block"
+                  >
+                    <motion.li
+                      whileHover={{ scale: 1.04 }}
+                      className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 cursor-pointer
+                      transition-all duration-300 group
+                      hover:border-[#4F83FF]
+                      hover:shadow-[0_0_25px_rgba(79,131,255,0.45)]
+                      hover:scale-[1.01]"
+                    >
+                      <span className="text-[#D6E6F3] group-hover:text-blue-400 transition">
+                        ➜ {item}
+                      </span>
+                    </motion.li>
+                  </Link>
+                );
+              })}
             </ul>
           )}
         </div>
-
+        
         {/* Practice */}
         <div className="rounded-2xl p-6 bg-[#000926] border border-blue-900/40 text-white shadow-[0_6px_16px_rgba(0,9,38,0.35)]">
           <div className="flex justify-between cursor-pointer" onClick={() => setOpenPractice(!openPractice)}>
@@ -802,7 +812,7 @@ return (
                       if (!ok) return;
 
                       await fetch(
-                        `${API_BASE}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(topic.title)}`,
+                        `${API_BASE}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(title)}`,
                         {
                           method: "DELETE",
                           headers: { Authorization: `Bearer ${token}` },
@@ -841,9 +851,7 @@ return (
                                 if (!token) return;
 
                                 const res = await fetch(
-                                  `${API_BASE}/roadmap/topic/chat?title=${encodeURIComponent(
-                                    topic.title
-                                  )}&session_id=${s.id}`,
+                                  `${API_BASE}/roadmap/topic/chat?title=${encodeURIComponent(title)}&session_id=${s.id}`,
                                   { headers: { Authorization: `Bearer ${token}` } }
                                 );
 
