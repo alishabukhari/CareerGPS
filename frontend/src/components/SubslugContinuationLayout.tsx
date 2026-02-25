@@ -22,6 +22,7 @@ type Item = {
   };
 };
 
+
 export default function SubslugContinuationLayout({
   pageTitle,
   explanation,
@@ -37,6 +38,7 @@ export default function SubslugContinuationLayout({
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
 
+  
   return (
     <div className="space-y-10">
       {/* AI Explanation */}

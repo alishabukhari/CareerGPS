@@ -7,6 +7,8 @@ import { getToken } from "@/lib/auth";
 import { markTaskComplete } from "@/lib/roadmapApi";
 import confetti from "canvas-confetti";
 import Link from "next/link";
+import AiSidePanel from "@/components/AiSidePanel";
+import { getSubslugComplete } from "@/lib/subslugCompletion";
 
 const API_BASE = "http://127.0.0.1:8000";
 
@@ -30,6 +32,7 @@ type ChatSession = {
   created_at: string;
   is_pinned?: boolean | null;
 };
+
 
 const groupSessionsByDate = (sessions: ChatSession[]) => {
   const groups: Record<string, ChatSession[]> = {};
@@ -97,13 +100,40 @@ export default function TopicDetailPage() {
   const [nextTopic, setNextTopic] = useState<{ title: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  const phase = topic?.phase?.toLowerCase() || "";
+  const [subslugCompletion, setSubslugCompletion] = useState({
+    learn: false,
+    projects: false,
+    portfolio: false,
+  });
 
-const phaseLabel = phase.includes("core")
-  ? "Core Skills"
-  : phase.includes("advanced")
-  ? "Advanced"
-  : "Foundation";
+  const phase = topic?.phase?.toLowerCase() || "";
+  const [subComplete, setSubComplete] = useState({
+    learn: false,
+    projects: false,
+    portfolio: false,
+  });
+
+
+  const phaseLabel = phase.includes("core")
+    ? "Core Skills"
+    : phase.includes("advanced")
+    ? "Advanced"
+    : "Foundation";
+
+useEffect(() => {
+  const refresh = () => {
+    setSubComplete({
+      learn: getSubslugComplete(slug, "learn"),
+      projects: getSubslugComplete(slug, "projects"),
+      portfolio: getSubslugComplete(slug, "portfolio"),
+    });
+  };
+
+  refresh();
+  window.addEventListener("cgps-subslug-complete-changed", refresh);
+  return () => window.removeEventListener("cgps-subslug-complete-changed", refresh);
+}, [slug]);
+
 
  useEffect(() => {  
   if (!roadmapItems.length || !topic?.title) return;  
@@ -489,6 +519,38 @@ return (
         </div>
 
         <h1 className="text-4xl font-extrabold">{topic.title}</h1>
+          <div className="flex flex-wrap gap-3">
+            {[
+              { label: "Learn", key: "learn" as const },
+              { label: "Projects", key: "projects" as const },
+              { label: "Portfolio", key: "portfolio" as const },
+            ].map((x) => (
+              <button
+                key={x.label}
+                onClick={() =>
+                  setSubComplete((prev) => ({
+                    ...prev,
+                    [x.key]: !prev[x.key],
+                  }))
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-blue-200 text-blue-600 font-semibold text-sm
+                hover:bg-[#000926] hover:text-white transition"
+              >
+                <span
+                  className={`h-5 w-5 rounded-full border grid place-items-center ${
+                    subComplete[x.key]
+                      ? "bg-blue-600 border-blue-600"
+                      : "bg-white border-blue-300"
+                  }`}
+                >
+                  {subComplete[x.key] ? (
+                    <img src="/whitetick.png" className="w-3 h-3" />
+                  ) : null}
+                </span>
+                {x.label}
+              </button>
+            ))}
+          </div>
 
         {/* AI Explanation */}
         <div className="relative overflow-hidden rounded-3xl p-8 
@@ -560,7 +622,7 @@ return (
                 return (
                   <Link
                     key={i}
-                    href={`/roadmap/${slug}/learn/${subslug}`}
+                    href={`/roadmap/${slug}/learn`}
                     className="block"
                   >
                     <motion.li
@@ -599,14 +661,15 @@ return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
               {(PRACTICE_IDEAS_BY_PHASE[phaseLabel.toLowerCase() as "foundation" | "core skills" | "advanced"] || []).map(
                 (idea, i) => (
-                <motion.div
+                <motion.li
                   key={i}
                   whileHover={{ scale: 1.04 }}
-                  className="bg-[#000926] border border-[#0F52BA] rounded-2xl p-5 flex gap-4
-                  transition-all duration-300 group
+                  onClick={() => router.push(`/roadmap/${slug}/portfolio`)}
+                  className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 flex gap-3 items-center
+                  transition-all duration-300 group cursor-pointer
                   hover:border-[#4F83FF]
-                  hover:shadow-[0_6px_18px_rgba(79,131,255,0.35)]
-                  hover:scale-[1.01]"
+                  hover:shadow-[0_6px_16px_rgba(79,131,255,0.3)]
+                  hover:scale-[1.005]"
                 >
                   <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-blue-500/20 text-blue-400">
                     {i + 1}
@@ -614,7 +677,7 @@ return (
                   <span className="text-[#D6E6F3] group-hover:text-blue-400 transition">
                     {idea}
                   </span>
-                </motion.div>
+                </motion.li>
               ))}
             </div>
           )}
@@ -726,363 +789,11 @@ return (
           </div>
           
       {/* AI CHATBOT */}
-      <AnimatePresence>
-        {showAI && (
-          <motion.aside
-            initial={{ x: 80, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: 80, opacity: 0 }}
-            className="fixed -top-11 right-0 bottom-0 w-[520px] bg-[#EEF5FF] border-l border-blue-300 shadow-xl z-40 flex flex-col"
-          >
-            <div className="bg-blue-600 p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <motion.img
-                    src="/whitebot.png"
-                    className="w-14 h-14"
-                    animate={{ y: [-4, 4, -4] }}
-                    transition={{ repeat: Infinity, duration: 2 }}
-                  />
-                  <div>
-                    <p className="font-semibold text-white text-sm">
-                      AI Learning Assistant
-                    </p>
-                    <p className="text-xs text-white/80">
-                      Always here to help you learn
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex gap-2 items-center">
-                  <button
-                    onClick={() => {
-                      setShowHistory((v) => {
-                        const next = !v;
-                        if (next) loadChatSessions(); // 🔥 load when opening history
-                        return next;
-                      });
-                    }}
-                    className="text-white/90 hover:text-white text-xs border border-white/40 px-3 py-1 rounded-full hover:bg-white/20 transition"
-                  >
-                    {showHistory ? "Hide history ▲" : "Show history ▼"}
-                  </button>
-
-                  <button
-                    onClick={async () => {
-                      setActiveSessionId(null);
-                      setMessages([]);
-                      await loadChatSessions();
-                    }}
-                    className="text-white text-xs border border-white/40 px-3 py-1 rounded-full hover:bg-white/20 transition"
-                  >
-                    + New Chat
-                  </button>
-
-                  <button
-                    onClick={() => setShowAI(false)}
-                    className="text-white transition-transform duration-700 hover:rotate-90"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            </div>
-
-              {showHistory && (
-                <>
-                {loadingSessions && (
-                  <p className="text-xs text-slate-400">Loading chats…</p>
-                )}
-
-                {!loadingSessions && chatSessions.length === 0 && (
-                  <p className="text-xs text-slate-400">No chats yet</p>
-                )}
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="border-b border-blue-200 p-3 text-xs space-y-3 overflow-hidden bg-white/70 max-h-[240px] overflow-y-auto"
-                >
-                  <button
-                    onClick={async () => {
-                      const token = getToken();
-                      if (!token) return;
-
-                      const ok = confirm("Delete ALL chats for this topic? This cannot be undone.");
-                      if (!ok) return;
-
-                      await fetch(
-                        `${API_BASE}/roadmap/topic/chat/sessions?topic_title=${encodeURIComponent(title)}`,
-                        {
-                          method: "DELETE",
-                          headers: { Authorization: `Bearer ${token}` },
-                        }
-                      );
-
-                      setActiveSessionId(null);
-                      setMessages([]);
-                      loadChatSessions();
-                    }}
-                    className="mb-2 text-[11px] text-red-600 hover:underline"
-                  >
-                    🗑️ Delete all chats for this topic
-                  </button>
-
-                  {Object.entries(groupedSessions).map(([label, sessions]) => (
-                    <div key={label}>
-                      <p className="font-semibold text-slate-500 uppercase tracking-wide mb-1">
-                        {label}
-                      </p>
-
-                      <div className="space-y-1">
-                        {(sessions as ChatSession[]).map((s) => (
-                          <div
-                            key={s.id}
-                            className={`group flex items-center justify-between w-full px-3 py-2 rounded-lg transition
-                              ${activeSessionId === s.id ? "bg-blue-100" : "hover:bg-blue-100"}
-                              ${s.is_pinned ? "border border-yellow-300/50 bg-yellow-50/40" : ""}`}
-                          >
-                            {/* LEFT: click to open chat */}
-                            <button
-                              onClick={async () => {
-                                setActiveSessionId(s.id);
-
-                                const token = getToken();
-                                if (!token) return;
-
-                                const res = await fetch(
-                                  `${API_BASE}/roadmap/topic/chat?title=${encodeURIComponent(title)}&session_id=${s.id}`,
-                                  { headers: { Authorization: `Bearer ${token}` } }
-                                );
-
-                                const data = await res.json();
-                                setMessages(data.messages || []);
-                              }}
-                              className="flex-1 text-left"
-                            >
-                              <p className="font-medium text-slate-700 truncate flex items-center gap-2">
-                                {s.preview_title || "Chat Session"}
-
-                                {/* 📌 show pin icon ONLY if pinned */}
-                                {s.is_pinned && (
-                                  <img
-                                    src="/pin.png"
-                                    className="w-3.5 h-3.5 opacity-80"
-                                    title="Pinned chat"
-                                  />
-                                )}
-                              </p>
-
-                              <p className="text-[10px] text-slate-400">
-                                {new Date(s.created_at).toLocaleTimeString()}
-                              </p>
-                            </button>
-
-                            {/* RIGHT: 3 dots menu */}
-                            <div className="flex items-center gap-1 relative">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenMenuId(openMenuId === s.id ? null : s.id);
-                                }}
-                                className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-slate-800 transition px-2"
-                              >
-                                ⋯
-                              </button>
-
-                              {openMenuId === s.id && (
-                                <div
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="absolute right-0 top-7 z-50 w-40 bg-white rounded-lg shadow-lg border text-xs overflow-hidden"
-                                >
-                                  <button
-                                    onClick={async () => {
-                                      const token = getToken();
-                                      if (!token) return;
-
-                                      try {
-                                        const res = await fetch(
-                                          `${API_BASE}/roadmap/topic/chat/session/pin/${s.id}`,
-                                          { method: "POST", headers: { Authorization: `Bearer ${token}` } }
-                                        );
-
-                                        if (!res.ok) {
-                                          const data = await res.json();
-                                          alert(data?.detail || "You can only pin up to 3 chats.");
-                                          return;
-                                        }
-
-                                        setOpenMenuId(null);
-                                        await loadChatSessions();
-                                      } catch {
-                                        alert("Pin failed. Try again.");
-                                      }
-                                    }}
-                                    disabled={!s.is_pinned && pinnedCount >= 3}
-                                    className={`flex items-center gap-2 w-full px-3 py-2 text-left
-                                      ${!s.is_pinned && pinnedCount >= 3
-                                        ? "opacity-40 cursor-not-allowed"
-                                        : "hover:bg-blue-50"
-                                      }
-                                    `}
-                                  >
-                                    <img src={s.is_pinned ? "/unpin.png" : "/pin.png"} className="w-4 h-4" />
-                                    {s.is_pinned ? "Unpin chat" : "Pin chat"}
-                                  </button>
-
-                                  {/* Delete */}
-                                  <button
-                                    onClick={async () => {
-                                      const token = getToken();
-                                      if (!token) return;
-
-                                      await fetch(`${API_BASE}/roadmap/topic/chat/session/${s.id}`, {
-                                        method: "DELETE",
-                                        headers: { Authorization: `Bearer ${token}` },
-                                      });
-
-                                      setOpenMenuId(null);
-                                      await loadChatSessions();
-
-                                      if (activeSessionId === s.id) {
-                                        setActiveSessionId(null);
-                                        setMessages([]);
-                                      }
-                                    }}
-                                    className="flex items-center gap-2 w-full px-3 py-2 hover:bg-red-50 text-red-600 text-left"
-                                  >
-                                    <img src="/bin.png" className="w-4 h-4" />
-                                    Delete chat
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </motion.div>
-              </>
-              )}
-
-            <motion.div
-            layout
-            transition={{ duration: 0.25, ease: "easeInOut" }}
-            className="flex-1 p-4 pt-2 overflow-y-auto space-y-4 text-sm scroll-smooth"
-          >
-            {messages.map((m, i) => (
-            <div
-              key={m.id || `${m.role}-${i}`}
-              className={`flex gap-3 items-start ${m.role === "user" ? "justify-end" : ""}`}
-            >
-              {/* Assistant avatar */}
-              {m.role === "assistant" && (
-                <span className="h-10 w-10 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0">
-                  <img src="/bluebot.png" className="w-8 h-8" />
-                </span>
-              )}
-
-              {/* Message + reactions column */}
-              <div className="flex flex-col max-w-[85%]">
-                {/* Message bubble */}
-                <div
-                  className={`px-4 py-3 rounded-2xl inline-block max-w-full break-words whitespace-pre-wrap leading-relaxed text-[13px] ${
-                    m.role === "assistant"
-                      ? "bg-blue-600 text-white"
-                      : "bg-white border text-slate-800"
-                  }`}
-                  style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}
-                >
-                  {m.content
-                    ? renderMessage(m.content)
-                    : isStreaming && m.role === "assistant" && (
-                        <div className="flex items-center gap-1 h-5">
-                          <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:0ms]" />
-                          <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:150ms]" />
-                          <span className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:300ms]" />
-                        </div>
-                      )}
-                </div>
-
-                {/* Reactions BELOW the bubble */}
-                {m.role === "assistant" && !isStreaming && (
-                  <div className="flex gap-2 mt-2 ml-2">
-                    <img
-                      src="/copy.png"
-                      title="Copy"
-                      className="w-7 h-7 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition"
-                      onClick={() => {
-                        navigator.clipboard.writeText(m.content);
-                        setShowCopied(true);
-                        setTimeout(() => setShowCopied(false), 1200);
-                      }}
-                    />
-
-                    <img
-                      src="/like.png"
-                      title="Like"
-                      className="w-7 h-7 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition"
-                      onClick={() => reactToMessage(m.content, "like")}
-                    />
-
-                    <img
-                      src="/dislike.png"
-                      title="Dislike"
-                      className="w-7 h-7 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition"
-                      onClick={() => reactToMessage(m.content, "dislike")}
-                    />
-
-                    <img
-                      src="/regenerate.png"
-                      title="Regenerate"
-                      className="w-7 h-7 cursor-pointer opacity-50 hover:opacity-100 hover:scale-110 transition"
-                      onClick={() =>
-                        streamTopicAI(messages[messages.length - 2]?.content || "")
-                      }
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* User avatar */}
-              {m.role === "user" && (
-                <span className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center shrink-0">
-                  <img src="/person.png" className="w-7 h-7" />
-                </span>
-              )}
-            </div>
-          ))}
-
-            <div ref={messagesEndRef} />
-          </motion.div>
-            
-            {showCopied && (
-              <div className="absolute bottom-16 right-6 bg-black/80 text-white text-xs px-3 py-1 rounded-full shadow-lg animate-pulse">
-                Copied ✓
-              </div>
-            )}
-
-            <div className="p-3 border-t border-blue-300 flex gap-2">
-              <input
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") streamTopicAI(chatInput); }}
-                className="flex-1 rounded-lg bg-white px-3 py-2 text-sm outline-none"
-                placeholder="Ask me anything..."
-                disabled={isStreaming}
-              />
-              <button
-                onClick={() => streamTopicAI(chatInput)}
-                disabled={isStreaming}
-                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-3 rounded-lg transition"
-              >
-                ➤
-              </button>
-            </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
+      <AiSidePanel
+        isOpen={showAI}
+        onClose={() => setShowAI(false)}
+        topicTitle={title}
+      />
     </motion.div>
     </div>
   </div>
