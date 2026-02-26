@@ -77,13 +77,11 @@ export default function TopicDetailPage() {
   const [marking, setMarking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [showAI, setShowAI] = useState(false);
   const [aiMode, setAiMode] = useState<"chat" | "ideas" | null>(null);
   const [celebrate, setCelebrate] = useState(false);
 
   const [openLearn, setOpenLearn] = useState(true);
   const [openPractice, setOpenPractice] = useState(true);
-  const [openPortfolio, setOpenPortfolio] = useState(true);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -99,18 +97,31 @@ export default function TopicDetailPage() {
   const [roadmapItems, setRoadmapItems] = useState<{ title: string }[]>([]);
   const [nextTopic, setNextTopic] = useState<{ title: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  
+  const [showAI, setShowAI] = useState(false);
+  const [aiContext, setAiContext] = useState<{
+    kind: "topic" | "learn_item" | "practice" | "project";
+    title: string;
+    detail?: string;
+  } | null>(null);
+
+  const openAI = (ctx?: typeof aiContext) => {
+    console.log("AI OPEN", ctx);
+    setAiContext(ctx ?? { kind: "topic", title: topic?.title ?? "Topic" });
+    setShowAI(true);
+  };
+
+const closeAI = () => setShowAI(false);
 
   const [subslugCompletion, setSubslugCompletion] = useState({
     learn: false,
     projects: false,
-    portfolio: false,
   });
 
   const phase = topic?.phase?.toLowerCase() || "";
   const [subComplete, setSubComplete] = useState({
     learn: false,
     projects: false,
-    portfolio: false,
   });
 
 
@@ -125,8 +136,7 @@ useEffect(() => {
     setSubComplete({
       learn: getSubslugComplete(slug, "learn"),
       projects: getSubslugComplete(slug, "projects"),
-      portfolio: getSubslugComplete(slug, "portfolio"),
-    });
+     });
   };
 
   refresh();
@@ -186,15 +196,9 @@ useEffect(() => {
     } catch {}
   };
 
-  setTopic(null);
-  setMessages([]);
-  setActiveSessionId(null);
-
   loadTopic();
   loadRoadmapItems();
-}, [slug]);
-
-
+}, [slug, title]);
 
   // AUTO-SCROLL when messages change or streaming updates
   useEffect(() => {
@@ -277,8 +281,6 @@ useEffect(() => {
     console.error("Reaction failed");
   }
 };
-
-
 
 const streamTopicAI = async (userText: string) => {
   if (!userText.trim() || isStreaming) return;
@@ -479,23 +481,23 @@ function renderMessage(content: string) {
 }
 
 return (
+  <>
   <div className="w-full relative">
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-10">
+    <div className="grid grid-cols-1">
       {/* LEFT DARK NAVY PANEL */}
       {/*<div className="hidden lg:block lg:col-span-1 bg-[#020617] rounded-2xl" />*/}
 
       {/* MAIN */}
-      <motion.div
-          animate={{
-            marginRight: showAI ? "520px" : "0px",
-            maxWidth: showAI ? "calc(100% - 520px)" : "100%",
-          }}
-          transition={{ duration: 0.35, ease: "easeInOut" }}
-          className="mx-auto w-full max-w-[1600px] space-y-10 lg:col-span-11 px-4 md:px-8 pt-0"
-        >
-
+      <div
+        className={`transition-all duration-300 ease-in-out ${
+          showAI ? "mr-[420px]" : "mr-0"
+        }`}
+      >
+        <motion.div className="mx-auto w-full max-w-[1100px] space-y-10 px-4 md:px-8 pt-0">
+        
         <div>
-          <button onClick={() => router.push("/roadmap")} className="text-blue-600 hover:underline cursor-pointer">
+          <button onClick={() => router.push("/roadmap")} 
+            className="text-blue-600 hover:underline cursor-pointer">
             ← Back to Roadmap
           </button>
 
@@ -523,7 +525,6 @@ return (
             {[
               { label: "Learn", key: "learn" as const },
               { label: "Projects", key: "projects" as const },
-              { label: "Portfolio", key: "portfolio" as const },
             ].map((x) => (
               <button
                 key={x.label}
@@ -553,7 +554,7 @@ return (
           </div>
 
         {/* AI Explanation */}
-        <div className="relative overflow-hidden rounded-3xl p-8 
+        <div className="relative rounded-3xl p-8
           
           bg-gradient-to-br from-blue-600 via-blue-500 to-blue-700 
           text-white shadow-[0_30px_80px_rgba(37,99,235,0.45)]">
@@ -575,7 +576,10 @@ return (
           </p>
 
           <button
-            onClick={() => { setShowAI(true); setAiMode("chat"); loadChatSessions(); setActiveSessionId(null); setMessages([]); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              openAI({ kind: "practice", title: topic.title });
+            }}
             className="mt-6 bg-white text-blue-600 px-5 py-2.5 rounded-xl text-xs font-semibold
             border border-blue-200 transition-all duration-200
             hover:-translate-y-[2px] hover:shadow-md
@@ -600,7 +604,7 @@ return (
               </span>
             </h3>
             <motion.span
-              animate={{ rotate: openPractice ? 180 : 0 }}
+              animate={{ rotate: openLearn ? 180 : 0 }}
               transition={{ duration: 0.25 }}
               className="text-[#A6C5D7] group-hover:text-[#4F83FF] transition"
             >
@@ -620,24 +624,21 @@ return (
                   .replace(/\s+/g, "-");  // spaces -> dashes
 
                 return (
-                  <Link
-                    key={i}
-                    href={`/roadmap/${slug}/learn`}
-                    className="block"
-                  >
-                    <motion.li
-                      whileHover={{ scale: 1.04 }}
-                      className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 cursor-pointer
-                      transition-all duration-300 group
-                      hover:border-[#4F83FF]
-                      hover:shadow-[0_0_25px_rgba(79,131,255,0.45)]
-                      hover:scale-[1.01]"
-                    >
-                      <span className="text-[#D6E6F3] group-hover:text-blue-400 transition">
-                        ➜ {item}
-                      </span>
-                    </motion.li>
-                  </Link>
+                  <motion.li
+                  key={i}
+                  onClick={() => {
+                    alert("Later: open popup/drawer here");
+                  }}
+                  className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 cursor-pointer
+                  transition-all duration-300 group
+                  hover:border-[#4F83FF]
+                  hover:shadow-[0_0_25px_rgba(79,131,255,0.45)]
+                  hover:scale-[1.01]"
+                >
+                  <span className="text-[#D6E6F3] group-hover:text-blue-400 transition">
+                    ➜ {item}
+                  </span>
+                </motion.li>
                 );
               })}
             </ul>
@@ -649,7 +650,7 @@ return (
           <div className="flex justify-between cursor-pointer" onClick={() => setOpenPractice(!openPractice)}>
             <h3>💡 Practice Ideas & Mini Projects</h3>
             <motion.span
-              animate={{ rotate: openPortfolio ? 180 : 0 }}
+              animate={{ rotate: openPractice ? 180 : 0 }}
               transition={{ duration: 0.25 }}
               className="text-blue-400 group-hover:text-blue-300"
             >
@@ -664,7 +665,6 @@ return (
                 <motion.li
                   key={i}
                   whileHover={{ scale: 1.04 }}
-                  onClick={() => router.push(`/roadmap/${slug}/portfolio`)}
                   className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 flex gap-3 items-center
                   transition-all duration-300 group cursor-pointer
                   hover:border-[#4F83FF]
@@ -680,48 +680,6 @@ return (
                 </motion.li>
               ))}
             </div>
-          )}
-        </div>
-
-        {/* Portfolio Tips */}
-        <div className="rounded-2xl p-6 bg-[#000926] border border-blue-900/40 text-white shadow-[0_6px_16px_rgba(0,9,38,0.35)]">
-          <div className="flex justify-between cursor-pointer" onClick={() => setOpenPortfolio(!openPortfolio)}>
-            <h3>🎯 Portfolio Improvement Tips</h3>
-            <motion.span
-              animate={{ rotate: openLearn ? 180 : 0 }}
-              transition={{ duration: 0.25 }}
-              className="text-blue-400 group-hover:text-blue-300"
-            >
-              ▾
-            </motion.span>
-          </div>
-
-          {openPortfolio && (
-            <ul className="mt-4 space-y-2">
-              {[
-                "Showcase clean semantic HTML",
-                "Follow WCAG accessibility standards",
-                "Use SEO meta tags",
-                "Document decisions in README",
-              ].map((tip, i) => (
-                <motion.li
-                  key={i}
-                  whileHover={{ scale: 1.04 }}
-                  className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 flex gap-3 items-center
-                  transition-all duration-300 group
-                  hover:border-[#4F83FF]
-                  hover:shadow-[0_6px_16px_rgba(79,131,255,0.3)]
-                  hover:scale-[1.005]"
-                >
-                  <span className="h-10 w-10 rounded-full bg-blue-500/20 flex items-center justify-center">
-                    <img src="/whitetick.png" className="w-7 h-7" />
-                  </span>
-                  <span className="text-[#D6E6F3] group-hover:text-blue-400 transition">
-                    {tip}
-                  </span>
-                </motion.li>
-              ))}
-            </ul>
           )}
         </div>
 
@@ -769,12 +727,9 @@ return (
             </motion.button>
 
             <button
-              onClick={() => {
-                setShowAI(true);
-                setAiMode("chat");
-                loadChatSessions();     // 🔥 this is what was missing
-                setActiveSessionId(null);
-                setMessages([]);
+              onClick={(e) => {
+                e.stopPropagation();
+                openAI({ kind: "practice", title: topic.title });
               }}
               className="w-full py-3.5 rounded-xl bg-white text-blue-600 font-semibold
               border border-blue-300 transition-all duration-200
@@ -787,15 +742,17 @@ return (
               Ask AI for Help
             </button>
           </div>
-          
-      {/* AI CHATBOT */}
+        </motion.div>  
+      </div>
+    </div>    
+  </div>
+     {/* AI CHATBOT */}
       <AiSidePanel
         isOpen={showAI}
         onClose={() => setShowAI(false)}
         topicTitle={title}
+        aiContext={aiContext}
       />
-    </motion.div>
-    </div>
-  </div>
+  </>
 )
 }

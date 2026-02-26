@@ -454,6 +454,7 @@ const advancedLocked = false;
                                 Complete previous stages to unlock Advanced
                               </p>
                             )}
+                           
 
                   {/* cards */}
                   <div className="col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -474,7 +475,7 @@ const advancedLocked = false;
                       const isLocked =
                         (section.id === 2 && coreLocked) ||
                         (section.id === 3 && advancedLocked);
-
+                      
                       return (
                         <motion.div
                           key={item.title}

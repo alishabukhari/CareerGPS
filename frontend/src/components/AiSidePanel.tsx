@@ -51,11 +51,18 @@ export default function AiSidePanel({
   isOpen,
   onClose,
   topicTitle,
+  aiContext,
 }: {
   isOpen: boolean;
   onClose: () => void;
   topicTitle: string;
+  aiContext?: {
+    kind: "topic" | "learn_item" | "practice" | "project";
+    title: string;
+    detail?: string;
+  } | null;
 }) {
+
   const [copied, setCopied] = useState(false);
   const [showCopied, setShowCopied] = useState(false);
 
@@ -321,14 +328,17 @@ export default function AiSidePanel({
   };
 
   return (
+    <>
     <AnimatePresence>
       {isOpen && (
-        <motion.aside
-          initial={{ x: 80, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: 80, opacity: 0 }}
-          className="fixed -top-11 right-0 bottom-0 w-[520px] bg-[#EEF5FF] border-l border-blue-300 shadow-xl z-40 flex flex-col"
-        >
+          <motion.aside
+            key="ai-side-panel" 
+            initial={{ x: 420, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 80, opacity: 0 }}
+            className="fixed top-0 right-0 bottom-0 w-[420px] bg-[#EEF5FF] border-l border-blue-300 shadow-2xl z-[999999] flex flex-col pointer-events-auto"
+          >
+          
           <div className="bg-blue-600 p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -341,6 +351,12 @@ export default function AiSidePanel({
                 <div>
                   <p className="font-semibold text-white text-sm">AI Learning Assistant</p>
                   <p className="text-xs text-white/80">Always here to help you learn</p>
+
+                  {aiContext && (
+                    <p className="text-[10px] text-white/70 mt-1">
+                      Mode: {aiContext.kind.replace("_", " ")}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -655,5 +671,6 @@ export default function AiSidePanel({
         </motion.aside>
       )}
     </AnimatePresence>
+  </>
   );
 }
