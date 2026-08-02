@@ -97,7 +97,7 @@ export default function TopicDetailPage() {
   const [roadmapItems, setRoadmapItems] = useState<{ title: string }[]>([]);
   const [nextTopic, setNextTopic] = useState<{ title: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  
+  const [activeLearnItem, setActiveLearnItem] = useState<string | null>(null);
   const [showAI, setShowAI] = useState(false);
   const [aiContext, setAiContext] = useState<{
     kind: "topic" | "learn_item" | "practice" | "project";
@@ -482,7 +482,7 @@ function renderMessage(content: string) {
 
 return (
   <>
-  <div className="w-full relative">
+  <div className="w-full">
     <div className="grid grid-cols-1">
       {/* LEFT DARK NAVY PANEL */}
       {/*<div className="hidden lg:block lg:col-span-1 bg-[#020617] rounded-2xl" />*/}
@@ -493,7 +493,7 @@ return (
           showAI ? "mr-[420px]" : "mr-0"
         }`}
       >
-        <motion.div className="mx-auto w-full max-w-[1100px] space-y-10 px-4 md:px-8 pt-0">
+        <motion.div className="relative z-0 mx-auto w-full max-w-[1100px] space-y-10 px-4 md:px-8 pt-0">
         
         <div>
           <button onClick={() => router.push("/roadmap")} 
@@ -627,7 +627,7 @@ return (
                   <motion.li
                   key={i}
                   onClick={() => {
-                    alert("Later: open popup/drawer here");
+                    setActiveLearnItem(item);
                   }}
                   className="bg-[#000926] border border-[#0F52BA] rounded-2xl px-4 py-3 cursor-pointer
                   transition-all duration-300 group
@@ -746,6 +746,64 @@ return (
       </div>
     </div>    
   </div>
+      <AnimatePresence>
+      {activeLearnItem && (
+        <motion.aside
+          initial={{ x: 500 }}
+          animate={{ x: 0 }}
+          exit={{ x: 500 }}
+          transition={{ duration: 0.3 }}
+          className="fixed top-0 right-0 bottom-0 w-[500px] bg-white shadow-2xl z-[99998] p-6 overflow-y-auto"
+        >
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-lg font-bold text-[#000926]">
+              {activeLearnItem}
+            </h3>
+            <button
+              onClick={() => setActiveLearnItem(null)}
+              className="text-slate-500 hover:text-black"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="space-y-4 text-sm text-slate-700">
+            <p>
+              Simple explanation about <b>{activeLearnItem}</b> goes here.
+            </p>
+
+            <div className="p-4 bg-blue-50 rounded-xl border">
+              <p className="font-semibold mb-1">Formula (if applicable)</p>
+              <p>V = I × R</p>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-xl border">
+              <p className="font-semibold mb-1">Free YouTube Resource</p>
+              <a
+                href="#"
+                className="text-blue-600 underline"
+                target="_blank"
+              >
+                Watch tutorial
+              </a>
+            </div>
+
+            <button
+              onClick={() =>
+                openAI({
+                  kind: "learn_item",
+                  title: topic.title,
+                  detail: activeLearnItem,
+                })
+              }
+              className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg"
+            >
+              Ask AI about this
+            </button>
+          </div>
+        </motion.aside>
+      )}
+    </AnimatePresence>
      {/* AI CHATBOT */}
       <AiSidePanel
         isOpen={showAI}

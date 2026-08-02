@@ -1,137 +1,304 @@
-<!-- README refresh -->
+# 🚀 CareerGPS
+### AI-Powered Career Roadmap & Personalized Learning Platform
 
-# CareerGPS 🚀  
-AI-Powered Career Path & Skill Mapping Platform
+CareerGPS is a full-stack AI-powered learning platform that helps students and aspiring software engineers build personalized learning roadmaps, track progress, and receive AI-assisted guidance throughout their learning journey.
 
-CareerGPS is an AI-driven platform designed to help students and early-career professionals understand **where they stand**, **what skills they are missing**, and **how to progress toward a desired career path**.
-
-This project focuses on backend engineering, authentication, database design, and scalable system architecture.
+The platform combines **Next.js**, **FastAPI**, **Supabase**, and **OpenAI** to deliver an interactive career planning experience with structured learning paths and intelligent assistance.
 
 ---
 
-## 🎯 Problem Statement
+# ✨ Features
 
-Students often struggle to answer:
-- What roles fit my current skills?
-- What should I learn next?
-- How far am I from a specific career path?
-
-CareerGPS addresses this by:
-- Collecting user skills and interests
-- Mapping them against role requirements
-- Providing structured, actionable guidance
+- 🔐 Secure user authentication
+- 👤 Personalized user profiles
+- 🧠 AI-generated learning roadmaps
+- 📚 Foundation → Core Skills → Advanced learning paths
+- ✅ Progress tracking
+- 📈 Learning statistics dashboard
+- 🎯 Daily & Weekly learning focus
+- 💬 AI chat assistant *(currently under development)*
+- 📡 FastAPI REST API
+- 🗄️ Supabase PostgreSQL database
+- ⚡ Modern React + Next.js frontend
 
 ---
 
-## 🛠️ Tech Stack
+# 📸 Application Preview
 
-**Backend**
-- Python
-- FastAPI
-- Supabase (PostgreSQL, Authentication, RLS)
+## Landing Page
 
-**Frontend**
-- Next.js
+![Landing Page](docs/images/landing-page.png)
+
+---
+
+## Login
+
+![Login](docs/images/login-page.png)
+
+---
+
+## Sign Up
+
+![Signup](docs/images/signup-page.png)
+
+---
+
+## Dashboard
+
+Personalized dashboard showing overall progress, current learning streak, weekly focus, and today's recommended topic.
+
+![Dashboard](docs/images/dashboard.png)
+
+---
+
+## Personalized Roadmap
+
+AI-generated roadmap divided into Foundation, Core Skills, and Advanced stages.
+
+![Roadmap](docs/images/roadmap-overview.png)
+
+---
+
+## Progress Tracking
+
+Users can complete topics, unlock new stages, and visualize their learning progress.
+
+![Roadmap Progress](docs/images/roadmap-progress.png)
+
+---
+
+# 🛠 Tech Stack
+
+## Frontend
+
+- Next.js (App Router)
 - React
 - TypeScript
+- Tailwind CSS
+- Framer Motion
 
-**Other**
-- REST APIs
-- JWT-based authentication
-- Environment-based configuration
+## Backend
+
+- FastAPI
+- Python
+- REST API
+- Server-Sent Events (SSE)
+
+## Database & Authentication
+
+- Supabase
+- PostgreSQL
+- Row Level Security (RLS)
+- JWT Authentication
+
+## AI
+
+- OpenAI API
+- Streaming AI Responses
 
 ---
 
-## 🧱 System Architecture (High-Level)
+# 🏗 System Architecture
+
+```text
+                    Next.js Frontend
+                           │
+                    REST API Requests
+                           │
+                           ▼
+                    FastAPI Backend
+                           │
+      ┌────────────────────┼────────────────────┐
+      │                    │                    │
+      ▼                    ▼                    ▼
+  Supabase DB         OpenAI API         Authentication
+(PostgreSQL + RLS)    AI Responses      JWT + Supabase
+```
+
+---
+
+# 🔐 Authentication
+
+CareerGPS uses secure authentication powered by Supabase.
+
+Features include:
+
+- Email & Password Authentication
+- JWT-based Sessions
+- Protected API Routes
+- Row-Level Security (RLS)
+- Secure Backend Authorization
+
+---
+
+# 📡 Backend API
+
+FastAPI automatically generates interactive API documentation.
+
+Swagger UI
 
 ```
-Frontend (Next.js)
-|
-| REST API
-v
-Backend (FastAPI)
-|
-| Secure DB Access
-v
-Supabase (PostgreSQL + Auth)
+http://127.0.0.1:8000/docs
+```
+
+OpenAPI Schema
+
+```
+http://127.0.0.1:8000/openapi.json
+```
+
+Main endpoints include:
+
+### Authentication
+
+- POST `/signup`
+- POST `/login`
+- GET `/me`
+
+### Profile
+
+- GET `/profile`
+- PATCH `/profile`
+
+### Roadmap
+
+- GET `/roadmap`
+- GET `/roadmap/topic`
+- GET `/roadmap/topic/next`
+- GET `/roadmap/completed`
+- GET `/roadmap/stats`
+- GET `/roadmap/today`
+- POST `/roadmap/init`
+- POST `/roadmap/complete`
+
+### AI Chat
+
+- POST `/roadmap/topic/ai`
+- GET `/roadmap/topic/chat`
+- GET `/roadmap/topic/chat/sessions`
+- POST `/roadmap/topic/chat/session`
+- PUT `/roadmap/topic/chat/session/{session_id}`
+- DELETE `/roadmap/topic/chat/session/{session_id}`
+- POST `/roadmap/topic/react`
+
+---
+
+# 📂 Project Structure
+
+```
+CareerGPS
+│
+├── frontend
+│   ├── app
+│   ├── components
+│   ├── hooks
+│   └── lib
+│
+├── backend
+│   ├── app
+│   ├── routers
+│   ├── services
+│   ├── models
+│   └── utils
+│
+├── docs
+│   └── images
+│
+└── README.md
 ```
 
 ---
 
-## 🔐 Authentication & Security
+# 🚧 Current Status
 
-- Supabase email/password authentication
-- JWT-based session handling
-- Row Level Security (RLS) at the database level
-- Backend trusts only authenticated requests
+CareerGPS is actively under development.
 
----
+### ✅ Completed
 
-## ⚙️ Key Features
+- Authentication
+- User Profiles
+- Dashboard
+- AI Roadmap Generation
+- Progress Tracking
+- REST API
+- FastAPI Backend
+- Responsive Frontend
 
-- User signup and login
-- Skill and interest capture
-- Career path recommendations
-- Clean backend API structure
-- Modular and scalable design
+### 🔄 In Progress
 
----
+- AI Chat Assistant
+- Chat Memory
+- Session Management Improvements
+- Better AI Prompt Engineering
 
-## 📸 Project Screenshots
+### 📌 Planned
 
-### 🔹 Backend API (FastAPI + Swagger)
-Shows the implemented REST API endpoints including authentication and profile management.
-
-![Backend API](./screenshots/api-swagger.png)
-
----
-
-### 🔹 Frontend (Next.js)
-User-facing interface connected to the backend API.
-
-![Frontend UI](./screenshots/frontend-login.png)
-
----
-
-### 🔹 Authentication & Users (Supabase)
-Live user authentication using Supabase Auth with real users stored securely.
-
-![Supabase Auth](./screenshots/supabase-auth.png)
+- Google Calendar Integration
+- Resource Recommendations
+- AI Research Agent
+- Resume Builder
+- Interview Preparation
+- Learning Analytics
+- Weekly Email Reports
 
 ---
 
-## 🧠 What I Learned
+# 🚀 Running Locally
 
-- Designing RESTful APIs using FastAPI
-- Secure authentication workflows
-- PostgreSQL schema design and RLS policies
-- Structuring full-stack projects for maintainability
-- Translating real-world problems into software systems
-
----
-
-## 🚧 Project Status
-
-CareerGPS is an **ongoing project**. Planned improvements include:
-- Advanced AI-based recommendations
-- Skill-gap visualizations
-- Resume and learning roadmap generation
-
----
-
-## ▶️ Getting Started (Development)
-
-This project uses **Next.js** for the frontend.
+## Frontend
 
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
-Open http://localhost:3000 to view the app.
 
-🔗 Links
+Runs on:
 
-Portfolio: https://github.com/alishabukhari
+```
+http://localhost:3000
+```
 
-Repository: https://github.com/alishabukhari/CareerGPS
+---
 
+## Backend
+
+```bash
+cd backend
+
+.\.venv\Scripts\Activate.ps1
+
+python -m uvicorn app.main:app --reload
+```
+
+Runs on:
+
+```
+http://127.0.0.1:8000
+```
+
+---
+
+# 📖 What I Learned
+
+Through CareerGPS, I gained hands-on experience with:
+
+- Full-stack application development
+- FastAPI backend architecture
+- Next.js App Router
+- React state management
+- RESTful API design
+- Supabase Authentication & PostgreSQL
+- JWT-based authentication
+- AI integration with OpenAI
+- Building scalable software architecture
+
+---
+
+# 👩‍💻 Author
+
+**Alisha Bukhari**
+
+Computer Engineering Student | Aspiring Software Engineer | AI Enthusiast
+
+GitHub: https://github.com/alishabukhari
